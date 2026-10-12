@@ -1,0 +1,4 @@
+build/
+dist/
+*.orig
+*.bak

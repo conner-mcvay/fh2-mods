@@ -1,0 +1,4 @@
+# keep mod payloads byte-exact; they are packed into game archives
+mods/** -text
+*.ps1 text eol=crlf
+*.md text eol=lf
