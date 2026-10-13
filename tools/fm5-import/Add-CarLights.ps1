@@ -24,6 +24,10 @@
 param(
   [Parameter(Mandatory)][string[]]$Car,      # imported cars (MediaName)
   [Parameter(Mandatory)][string[]]$Donor,    # FH2 light donor per car
+  [string[]]$HeadlightStyle,                 # per car: glass (default: the lens glows), bulbs (the bulbs glow), or
+                                             #   outer-bulb (only the outboard bulb of twin-reflector lamps glows)
+  [string[]]$PresetFrom,                     # per car, optional: a car whose headlight and beam presets (colour,
+                                             #   beam pattern) to use instead of the donor's, e.g. a whiter halogen
   [string[]]$GraphFrom,                      # per car, optional: a car whose animation graph (.gsf) to use, e.g. when
                                              #   the car's own doesn't raise its pop-ups in FH2 ("" = keep its own)
   [string]$GameRoot, [string]$AzimuthRoot,
@@ -41,6 +45,7 @@ if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $A
 if (-not $GameRoot) { throw 'Pass -GameRoot (or run Import-Fm5Cars once so it''s remembered)' }
 if (-not $NoInstall -and -not $AzimuthRoot) { throw 'Pass -AzimuthRoot' }
 if ($Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
+foreach ($pn in 'HeadlightStyle', 'PresetFrom') { $pv = Get-Variable $pn -ValueOnly; if ($pv -and $pv.Count -ne $Car.Count) { throw "-$pn needs one entry per -Car (use "" for the default)" } }
 if ($GraphFrom -and $GraphFrom.Count -ne $Car.Count) { throw '-GraphFrom needs one entry per -Car (use "" for none)' }
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
 if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
@@ -50,8 +55,8 @@ function Read-Entries([string]$zip) {   # entry name (lowercase, '/') -> bytes, 
   $z = [IO.Compression.ZipFile]::OpenRead($zip); $h = @{}
   try {
     foreach ($e in $z.Entries) {
-      if ($e.FullName -notmatch '(?i)^(Lights\.bin|LightPresets\.bin|scene/exterior/.+\.modelbin|scene/[^/]+_skeleton\.modelbin)$') { continue }
-      $ms = New-Object IO.MemoryStream; $s = $e.Open(); $s.CopyTo($ms); $s.Close(); $h[$e.FullName.ToLower()] = $ms.ToArray()
+      if ($e.FullName -notmatch '(?i)^(Lights\.bin|LightPresets\.bin(_debug)?|scene/exterior/.+\.modelbin|scene/[^/]+_skeleton\.modelbin)$') { continue }
+      $ms = New-Object IO.MemoryStream; $s = $e.Open(); $s.CopyTo($ms); $s.Close(); $h[$e.FullName.ToLower()] = $ms.ToArray(); $h['name:' + $e.FullName.ToLower()] = $e.FullName
     }
   } finally { $z.Dispose() }
   $h
@@ -128,10 +133,35 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     $m.Path = "game:\media\cars\$($c.ToLower())\" + $lamp.Replace('/', '\')
     Write-Host ("  lamp [{0,2}] {1,-44} -> {2}" -f $m.Id, ($rel -replace '^scene/exterior/', ''), ($lamp -replace '^scene/exterior/', ''))
   }
+  $style = if ($HeadlightStyle -and $HeadlightStyle[$ci]) { $HeadlightStyle[$ci].ToLower() } else { 'glass' }
+  if ($style -notin 'glass', 'bulbs', 'outer-bulb') { throw "Unknown -HeadlightStyle $style (glass, bulbs or outer-bulb)" }
+  $bulbCentre = @{}
+  if ($style -ne 'glass') {
+    # the headlight lamps become the car's bulb models, so the bulbs glow instead of the whole lens
+    for ($k = 0; $k -lt $map.Count; $k++) {
+      $r = Role $map[$k].Donor; if ($r.Kind -ne 'head') { continue }
+      $bulbs = $targetModels | Where-Object { $x = Role $_; $x.Kind -eq 'head' -and $x.Side -eq $r.Side -and $x.Part -eq 'bulbs' } | Sort-Object | Select-Object -First 1
+      if (-not $bulbs) { Write-Warning "$c has no headlight bulb model for side $($r.Side); keeping $($map[$k].Target)"; continue }
+      $map[$k].Target = $bulbs; $lf.Meshes[$k].Path = "game:\media\cars\$($c.ToLower())\" + $bulbs.Replace('/', '\')
+      Write-Host ("  lamp [{0,2}] headlight -> {1} ({2})" -f $lf.Meshes[$k].Id, ($bulbs -replace '^scene/exterior/', ''), $style)
+    }
+    if ($style -eq 'outer-bulb') {
+      foreach ($bm in @($map | Where-Object { (Role $_.Donor).Kind -eq 'head' -and (Role $_.Target).Part -eq 'bulbs' } | ForEach-Object Target | Select-Object -Unique)) {
+        $cent = $null; $out = [OutboardBulb]::Keep($T[$bm], [ref]$cent)
+        if (-not $out) { Write-Warning "$bm has a single bulb; left as is"; continue }
+        $dest = Join-Path $modDir ("media\cars\$($tz.Name)\" + $T["name:$bm"].Replace('/', '\'))
+        New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null; [IO.File]::WriteAllBytes($dest, $out)
+        $bulbCentre[$bm] = $cent
+        Write-Host ("  {0}: inboard bulb dropped, outboard at ({1:N3},{2:N3},{3:N3})" -f ($bm -replace '^scene/exterior/', ''), $cent[0], $cent[1], $cent[2])
+      }
+    }
+  }
+
   # a donor headlight glass with no glass on the car (lens modelled into the housing, e.g. the FM5 2002 Trans Am):
   # also list the car's housing on the same bone. Appended, so the light records' mesh indices stay valid.
   $extra = @()
   for ($k = 0; $k -lt $map.Count; $k++) {
+    if ($style -ne 'glass') { break }
     $r = Role $map[$k].Donor
     if ($r.Kind -ne 'head' -or $r.Part -ne 'glass' -or (Role $map[$k].Target).Part -eq 'glass') { continue }
     $housing = $targetModels | Where-Object { $x = Role $_; $x.Kind -eq 'head' -and $x.Side -eq $r.Side -and $x.Part -eq 'main' } | Sort-Object | Select-Object -First 1
@@ -167,9 +197,11 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     $frame = $null
     if (-not $delta -and $mi -ge 0 -and $mi -lt $map.Count -and $map[$mi].Bone -like 'boneheadlight*' -and $donorBones.ContainsKey($map[$mi].Bone) -and $carBones.ContainsKey($map[$mi].Bone)) {
       $bn = $map[$mi].Bone
-      $carModel = $map[$mi].Target
-      if ((Role $carModel).Part -ne 'glass') {   # no lens glass: the lens is part of the housing
-        $r0 = Role $carModel; $h = $targetModels | Where-Object { $x0 = Role $_; $x0.Kind -eq 'head' -and $x0.Side -eq $r0.Side -and $x0.Part -eq 'main' } | Sort-Object | Select-Object -First 1
+      # the car's lens: its headlight glass, else the housing (lens modelled into it)
+      $carModel = $map[$mi].Target; $r0 = Role $carModel
+      if ($r0.Part -ne 'glass') {
+        $h = $targetModels | Where-Object { $x0 = Role $_; $x0.Kind -eq 'head' -and $x0.Side -eq $r0.Side -and $x0.Part -eq 'glass' } | Sort-Object | Select-Object -First 1
+        if (-not $h) { $h = $targetModels | Where-Object { $x0 = Role $_; $x0.Kind -eq 'head' -and $x0.Side -eq $r0.Side -and $x0.Part -eq 'main' } | Sort-Object | Select-Object -First 1 }
         if ($h) { $carModel = $h }
       }
       $dl = [LensFrame]::Of($D[$map[$mi].Donor]); $tl = [LensFrame]::Of($T[$carModel])
@@ -186,6 +218,8 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
       elseif ($frame) {
         $v = [Quat]::Rotate($frame.Q, @(($x - $frame.Cd[0]), ($y - $frame.Cd[1]), ($z - $frame.Cd[2])))
         $x = $frame.Ct[0] + $v[0]; $y = $frame.Ct[1] + $v[1]; $z = $frame.Ct[2] + $v[2]
+        # the headlight's glow (sub 0) sits on the one lit bulb
+        if ($bulbCentre.ContainsKey($map[$mi].Target) -and [BitConverter]::ToUInt16($rest, $o + 6) -eq 0) { $bc = $bulbCentre[$map[$mi].Target]; $x = $bc[0]; $y = $bc[1]; $z = $bc[2] }
         $q = @(0..3 | ForEach-Object { [BitConverter]::ToSingle($rest, $p + 16 + 4 * $_) })
         $q2 = [Quat]::Mul($frame.Q, [single[]]$q)
         for ($k = 0; $k -lt 4; $k++) { [BitConverter]::GetBytes([single]$q2[$k]).CopyTo($rest, $p + 16 + 4 * $k) }
@@ -209,7 +243,30 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   $dir = Join-Path $modDir "media\cars\$($tz.Name)"
   New-Item -ItemType Directory $dir -Force | Out-Null
   [IO.File]::WriteAllBytes((Join-Path $dir 'Lights.bin'), $lf.Write())
-  [IO.File]::WriteAllBytes((Join-Path $dir 'LightPresets.bin'), $D['lightpresets.bin'])
+  $presets = [byte[]]$D['lightpresets.bin'].Clone()
+  if ($PresetFrom -and $PresetFrom[$ci]) {
+    # LightPresets.bin: "LDFB", u32 size, u32 1, u32 function count, then one block per function (u32 block size
+    # first; tagged properties: tag 0x02 = colour), in the order of the PG_Function_* names in LightPresets.bin_debug.
+    # The headlight and beam functions are swapped for the other car's (same roles, same block sizes).
+    $pf = $PresetFrom[$ci]; $pz2 = Get-ChildItem $cars -Filter "$pf.zip" | Select-Object -First 1; if (-not $pz2) { throw "No car $pf for -PresetFrom" }
+    $presetCar = Read-Entries $pz2.FullName
+    $fns = { param($bin, $dbg)
+      $names = @([regex]::Matches([Text.Encoding]::ASCII.GetString($dbg), 'PG_Function_[A-Za-z0-9_]+') | ForEach-Object Value | Select-Object -Unique)
+      $n0 = [BitConverter]::ToUInt32($bin, 12); $p0 = 16; $l = @()
+      for ($j = 0; $j -lt $n0; $j++) { $sz = [BitConverter]::ToUInt32($bin, $p0)
+        $role = ($names[$j] -replace '^PG_Function_', '' -replace '_(HALOGEN|XENON|LED|TUNGSTEN)(_[A-Z])?(?=_|$)', '')
+        $l += [pscustomobject]@{ Name = $names[$j]; Role = $role; Offset = $p0; Size = $sz }; $p0 += $sz }
+      , $l }
+    $mine = & $fns $presets $D['lightpresets.bin_debug']; $theirs = & $fns $presetCar['lightpresets.bin'] $presetCar['lightpresets.bin_debug']
+    foreach ($fn in $mine | Where-Object { $_.Role -match '^(Headlight|LightProjection|LightProjectionAI)(_LEFT|_RIGHT)?$' }) {
+      $src = $theirs | Where-Object Role -eq $fn.Role | Select-Object -First 1
+      if (-not $src) { Write-Warning "$pf has no $($fn.Role) preset; keeping $($fn.Name)"; continue }
+      if ($src.Size -ne $fn.Size) { Write-Warning "$($src.Name) and $($fn.Name) differ in size; keeping $($fn.Name)"; continue }
+      [Array]::Copy($presetCar['lightpresets.bin'], $src.Offset, $presets, $fn.Offset, $src.Size)
+      Write-Host "  preset $($fn.Name) -> $($src.Name) (from $pf)"
+    }
+  }
+  [IO.File]::WriteAllBytes((Join-Path $dir 'LightPresets.bin'), $presets)
 
   if ($GraphFrom -and $GraphFrom[$ci]) {
     # the graph names its animations (.\x.gr2) and bones (root_<bone>); the car must have all of them

@@ -90,6 +90,40 @@ public static class LensFrame {
   static int Offset(VertexLayout l, VertexElement x) { int o = 0; foreach (var e in l.Elements.Where(e => e.Slot == x.Slot)) { if (e == x) break; o += VertexLayout.FormatSize(e.Format); } return o; }
 }
 
+// Keeps only the outboard one of the bulbs in a lamp model (e.g. the low beam of a twin-reflector headlight): the
+// triangles split into clusters along x, and those on the inboard side of the widest gap become degenerate (same
+// vertex three times), so counts and offsets stay as they are. Centroid = average of the kept triangles' centres.
+public static class OutboardBulb {
+  public static byte[] Keep(byte[] model, out float[] centroid) {
+    var f = BurgFile.Read(model); centroid = null;
+    var ibBlob = f.All("IndB")[0]; var ib = ibBlob.Data; int stride = BitConverter.ToUInt16(ib, 8);
+    Func<int, int> get = i => stride == 4 ? BitConverter.ToInt32(ib, 16 + 4 * i) : BitConverter.ToUInt16(ib, 16 + 2 * i);
+    Action<int, int> set = (i, v) => { if (stride == 4) BitConverter.GetBytes(v).CopyTo(ib, 16 + 4 * i); else BitConverter.GetBytes((ushort)v).CopyTo(ib, 16 + 2 * i); };
+    var buffers = f.All("VerB").ToDictionary(b => b.Id.Value, b => VertexBuffer.Parse(b.Data));
+    var tris = new List<Tuple<int, float[]>>();   // first index, centre
+    foreach (var m in f.All("Mesh").Select(MeshInfo.Parse).Where(m => m.Material != 0xFFFF)) {
+      VertexBuffer pb; if (!buffers.TryGetValue(m.VbIndex[0], out pb)) continue;
+      int p0 = m.VbOffset[0] / Math.Max(1, m.VbStride[0]);
+      for (int i = m.IndexStart; i + 2 < m.IndexStart + m.IndexCount; i += 3) {
+        var c = new float[3];
+        for (int k = 0; k < 3; k++) { int v = (get(i + k) + m.BaseVertex + p0) * pb.Stride; for (int a = 0; a < 3; a++) c[a] += BitConverter.ToSingle(pb.Bytes, v + 4 * a) / 3; }
+        tris.Add(Tuple.Create(i, c));
+      }
+    }
+    if (tris.Count < 2) return null;
+    var xs = tris.Select(t => Math.Abs(t.Item2[0])).OrderBy(x => x).ToList();
+    float gap = 0, cut = 0; for (int i = 1; i < xs.Count; i++) if (xs[i] - xs[i - 1] > gap) { gap = xs[i] - xs[i - 1]; cut = (xs[i] + xs[i - 1]) / 2; }
+    if (gap < 0.02f) return null;   // one bulb only
+    var kept = new List<float[]>();
+    foreach (var t in tris) {
+      if (Math.Abs(t.Item2[0]) >= cut) { kept.Add(t.Item2); continue; }
+      int first = get(t.Item1); set(t.Item1 + 1, first); set(t.Item1 + 2, first);
+    }
+    centroid = new[] { kept.Average(c => c[0]), kept.Average(c => c[1]), kept.Average(c => c[2]) };
+    return f.Write();
+  }
+}
+
 // Quaternions as x, y, z, w (the order Lights.bin stores them)
 public static class Quat {
   public static float[] Mul(float[] a, float[] b) {   // a * b: rotate by b, then by a
