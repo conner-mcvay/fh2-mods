@@ -8,8 +8,8 @@
   game files and installs it with backups (Install.ps1).
 
   Run it with no parameters (or double-click Import-Fm5Cars.cmd) to be asked for everything: your folders (remembered),
-  the FM5 cars to import (search by name), and per car an FH2 data donor (FH2-only car data and Autoshow group - pick
-  something similar) and a sound donor (an FH2 car whose engine sound it uses).
+  the FM5 cars to import (search by name), and per car an FH2 data donor (FH2-only car data - pick something similar),
+  a sound donor (an FH2 car whose engine sound it uses) and the Autoshow group to list it in (default: the donor's).
 
   Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb, other
   mods), and cars the game already has aren't offered. Each run gets its own backup folder (mod-backups\<Name>-<time>)
@@ -20,7 +20,8 @@
   .\tools\fm5-import\Import-Fm5Cars.ps1
 .EXAMPLE
   .\tools\fm5-import\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" `
-      -AzimuthRoot "D:\azimuth" -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,""
+      -AzimuthRoot "D:\azimuth" -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,"" `
+      -Group 'Retro Muscle',""
 .EXAMPLE
   .\tools\fm5-import\Import-Fm5Cars.ps1 -ListFm5Only    # FM5 cars FH2 doesn't have
 #>
@@ -33,6 +34,7 @@ param(
   [string[]]$Donor,                          # FH2 data donor per car (MediaName or Id); "" = automatic (same make, nearest year)
   [string[]]$SoundCar,                       # FH2 car per car whose engine sound to use; "" = the data donor's
   [string[]]$EngineSound,                    # or the FH2 engine MediaName directly
+  [string[]]$Group,                          # Autoshow group per car ('Modern Muscle', or its CarBuckets Id); "" = the data donor's
   [string]$Name = 'fm5-cars',                # install name (backups are mod-backups\<Name>-<time>)
   [string]$Sqlite = $env:FH2_SQLITE,
   [switch]$ListFm5Only,                      # just list the FM5 cars FH2 doesn't have
@@ -114,6 +116,36 @@ function Engine-Of([string]$fh2Car) {   # stock engine sound (engine MediaName) 
   $r[0][0]
 }
 
+# Autoshow groups (CarBuckets under a top-level group), names from FH2's English string table
+. (Join-Path $tools 'WheelSwap.ps1')
+$bucketNames = Read-StringTable (Join-Path $GameRoot 'Mount\media\stripped\stringtables\EN.zip') 'CarBuckets.str'
+$groupRows = Q 'SELECT b.Id, b.Name, p.Name, (SELECT COUNT(*) FROM fh.Data_Car_Buckets x WHERE x.CarBucket = b.Id), (SELECT c.MediaName FROM fh.Data_Car_Buckets x JOIN fh.Data_Car c ON c.Id = x.CarId WHERE x.CarBucket = b.Id ORDER BY c.Id LIMIT 1) FROM fh.CarBuckets b JOIN fh.CarBuckets p ON p.Id = b.ParentBucketId ORDER BY p.SortPriority, p.Id, b.SortPriority, b.Id'
+$groups = @($groupRows | ForEach-Object {
+  $n = Resolve-String $bucketNames $_[1]; if (-not $n) { $n = "(no name, e.g. $($_[4]))" }   # the game has a group without an English name
+  [pscustomobject]@{ Id = [int]$_[0]; Name = $n; Parent = (Resolve-String $bucketNames $_[2]); Cars = [int]$_[3] }
+})
+function Group-Of([string]$fh2Car) {   # the Autoshow group of an FH2 car (MediaName)
+  $r = Q "SELECT b.CarBucket FROM fh.Data_Car c JOIN fh.Data_Car_Buckets b ON b.CarId = c.Id WHERE c.MediaName = '$($fh2Car.Replace("'", ''))' COLLATE NOCASE"
+  if ($r) { $groups | Where-Object Id -eq ([int]$r[0][0]) }
+}
+function Find-Group([string]$g) {   # by Id, name, or "Parent > Name"
+  $hit = @($groups | Where-Object { "$($_.Id)" -eq $g -or $_.Name -ieq $g -or "$($_.Parent) > $($_.Name)" -ieq $g })
+  if ($hit.Count -ne 1) { throw "Unknown Autoshow group '$g'. Groups: $(($groups | ForEach-Object { "$($_.Id) $($_.Name)" }) -join ', ')" }
+  $hit[0]
+}
+function Pick-Group([object]$default) {   # numbered list; Enter keeps $default
+  $i = 0
+  foreach ($g in $groups) { $i++; Write-Host ('  {0,3}) {1,-16} {2,-28} {3,3} cars' -f $i, $g.Parent, $g.Name, $g.Cars) }
+  while ($true) {
+    $a = Ask "  Autoshow group [$(if ($default) { "$($default.Parent) > $($default.Name)" })]"
+    if (-not $a -and $default) { return $default }
+    if ($a -match '^\d+$' -and [int]$a -ge 1 -and [int]$a -le $groups.Count) { return $groups[[int]$a - 1] }
+    $hit = @($groups | Where-Object { $_.Name -like "*$a*" })
+    if ($hit.Count -eq 1) { return $hit[0] }
+    Write-Host '  Type a number from the list (or a unique part of a group name).' -ForegroundColor Yellow
+  }
+}
+
 function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$AllowDone) {
   # search by part of the name; a number picks from the last list shown; Enter takes the default (or finishes)
   $shown = @()
@@ -153,21 +185,26 @@ if ($interactive) {
     $d = Pick $fh2Cars '  Data donor' $suggest
     Write-Host '  Sound donor: an FH2 car whose engine sound to use.'
     $s = Pick $fh2Cars '  Sound donor' $d
-    $plan += @{ id = $c[0]; car = $c[1]; donor = $d[1]; soundCar = $s[1]; engine = (Engine-Of $s[1]) }
+    Write-Host '  Autoshow group: where the car is listed (also picks its wheel''s shop category). Enter keeps the data donor''s.'
+    $g = Pick-Group (Group-Of $d[1])
+    $plan += @{ id = $c[0]; car = $c[1]; donor = $d[1]; soundCar = $s[1]; engine = (Engine-Of $s[1]); group = $g.Id; groupName = $g.Name }
   }
   if (-not $plan.Count) { Write-Host 'Nothing to import.'; return }
   Write-Host "`nImport plan:" -ForegroundColor Cyan
-  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3})" -f $_.car, $_.donor, $_.soundCar, $_.engine) }
+  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3}), group {4}" -f $_.car, $_.donor, $_.soundCar, $_.engine, $_.groupName) }
   if ((Ask "`nProceed? [Y/n]") -match '^(n|no)$') { Write-Host 'Cancelled.'; return }
 } else {
   if ($Donor -and $Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
   if ($SoundCar -and $SoundCar.Count -ne $Car.Count) { throw '-SoundCar needs one entry per -Car (use "" for the data donor''s)' }
   if ($EngineSound -and $EngineSound.Count -ne $Car.Count) { throw '-EngineSound needs one entry per -Car (use "" for the data donor''s)' }
+  if ($Group -and $Group.Count -ne $Car.Count) { throw '-Group needs one entry per -Car (use "" for the data donor''s)' }
   for ($i = 0; $i -lt $Car.Count; $i++) {
     $row = @($fm5Only | Where-Object { $_[1] -ieq $Car[$i] -or $_[0] -eq $Car[$i] })
     if (-not $row) { throw "FM5 car $($Car[$i]) not found, or FH2 already has it (see -ListFm5Only)" }
     $e = if ($EngineSound -and $EngineSound[$i]) { $EngineSound[$i] } elseif ($SoundCar -and $SoundCar[$i]) { Engine-Of $SoundCar[$i] } else { $null }
-    $plan += @{ id = $row[0][0]; car = $row[0][1]; donor = $(if ($Donor) { $Donor[$i] } else { '' }); soundCar = $(if ($SoundCar) { $SoundCar[$i] } else { '' }); engine = $e }
+    $g = if ($Group -and $Group[$i]) { Find-Group $Group[$i] } else { $null }
+    $plan += @{ id = $row[0][0]; car = $row[0][1]; donor = $(if ($Donor) { $Donor[$i] } else { '' }); soundCar = $(if ($SoundCar) { $SoundCar[$i] } else { '' }); engine = $e
+                group = $(if ($g) { $g.Id }); groupName = $(if ($g) { $g.Name }) }
   }
 }
 if (-not $AzimuthRoot -and -not $NoInstall) { throw 'Pass -AzimuthRoot <folder containing azimuth.exe>' }
@@ -185,6 +222,7 @@ try {
     $a = @{ Car = $p.car; Mod = $mod; Fm5Media = $fm5Media; Game = $GameRoot; Layer = $true; Sqlite = $Sqlite }
     if ($p.donor) { $a.Donor = $p.donor }
     if ($p.engine) { $a.EngineSound = $p.engine }
+    if ($p.group) { $a.Bucket = $p.group }
     Write-Host ''
     # (the scripts report with Write-Host: filter the information stream to the useful lines)
     & (Join-Path $tools 'Export-Fm5Car.ps1') @a 6>&1 | Where-Object { "$_" -match '^(Exporting|Donor|  (thumb|bucket|sound|wheel|SOUND|BUCKET|WHEEL|CONFLICT|MISSING))' } | ForEach-Object { Write-Host "$_" }
@@ -202,6 +240,6 @@ $installed = @(& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -Azimuth
 $installed | ForEach-Object { Write-Host "$_" }
 $backup = ($installed | Where-Object { "$_" -like 'Backup: *' } | Select-Object -First 1) -replace '^Backup: '
 # remember what this layer imported (for later runs and for undoing it)
-ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
+ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine; group = $_.groupName } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
 Write-Host "`nDone. Start the game through azimuth.exe; the cars are in the Autoshow."
 Write-Host "Each import is undone separately, newest first, with the Uninstall.ps1 in its backup folder."
