@@ -22,7 +22,40 @@ function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
   } elseif ($Layer) { throw '-Layer needs -Game' } else { throw 'Pass -Package <Anthem_*.zip> or -Game <folder containing Mount> (or set FH2_PACKAGE / FH2_GAME)' }
 }
 
-function Close-StockSource { if ($script:Stock -and $script:Stock.Zip) { $script:Stock.Zip.Dispose() }; $script:Stock = $null }
+function Close-StockSource {
+  if ($script:Stock -and $script:Stock.Archives) { foreach ($a in $script:Stock.Archives.Values) { $a.Dispose() } }
+  if ($script:Stock -and $script:Stock.TempFiles) { $script:Stock.TempFiles | Remove-Item -ErrorAction SilentlyContinue }
+  if ($script:Stock -and $script:Stock.Zip) { $script:Stock.Zip.Dispose() }
+  $script:Stock = $null
+}
+
+function Test-StockFile([string]$rel) {   # does the base have this file?
+  if ($script:Stock.Kind -eq 'package') { return $script:Stock.Entries.ContainsKey($rel.ToLowerInvariant()) }
+  return (Test-Path -LiteralPath (Join-Path $script:Stock.Mount $rel) -PathType Leaf)
+}
+
+function Copy-StockEntry([string]$zipRel, [string]$entry, [string]$dest) {
+  # Copies one entry (path inside the zip, either slash, any case) of a base zip to $dest. Zips stay open until
+  # Close-StockSource, so reading many entries of one zip is cheap.
+  if (-not $script:Stock.Archives) { $script:Stock.Archives = @{} }
+  $k = $zipRel.ToLowerInvariant()
+  if (-not $script:Stock.Archives.ContainsKey($k)) {
+    if ($script:Stock.Kind -eq 'package' -or -not $script:Stock.Layer) {
+      # package: extract the zip first; stock game folder: Copy-StockFile verifies it
+      $tmp = Join-Path ([IO.Path]::GetTempPath()) ('fh2-stock-' + [IO.Path]::GetRandomFileName())
+      Copy-StockFile $zipRel $tmp
+      $script:Stock.TempFiles = @($script:Stock.TempFiles) + $tmp
+      $script:Stock.Archives[$k] = [IO.Compression.ZipFile]::OpenRead($tmp)
+    } else {
+      $script:Stock.Archives[$k] = [IO.Compression.ZipFile]::OpenRead((Join-Path $script:Stock.Mount $zipRel))
+    }
+  }
+  $want = $entry.Replace('\', '/')
+  $e = $script:Stock.Archives[$k].Entries | Where-Object { $_.FullName -ieq $want } | Select-Object -First 1
+  if (-not $e) { throw "Not found in Mount\${zipRel}: $entry" }
+  New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null
+  [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
+}
 
 function Get-StockList {   # every stock path under Mount (lowercase)
   if ($script:Stock.Kind -eq 'package') { return @($script:Stock.Entries.Keys) }

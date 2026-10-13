@@ -84,7 +84,12 @@ $zips = [ordered]@{}   # rel path -> extracted source dir (repacked once at the 
 function Use-Zip([string]$rel) {
   if ($zips.Contains($rel)) { return }
   $stockZip = Join-Path $work "stock\$rel"
-  Get-Stock $rel $stockZip
+  if (-not $imports.ContainsKey($rel) -and -not (Test-StockFile "media\$rel")) {
+    # a new zip: start from an empty archive (just the end-of-central-directory record)
+    New-Item -ItemType Directory (Split-Path $stockZip) -Force | Out-Null
+    $eocd = New-Object byte[] 22; $eocd[0] = 0x50; $eocd[1] = 0x4B; $eocd[2] = 5; $eocd[3] = 6
+    [IO.File]::WriteAllBytes($stockZip, $eocd)
+  } else { Get-Stock $rel $stockZip }
   $zips[$rel] = Join-Path $work "src\$rel"
   [IO.Compression.ZipFile]::ExtractToDirectory($stockZip, $zips[$rel])
 }
@@ -104,16 +109,24 @@ try {
       }
     }
 
-    # FM5 imports ("<FH2 media path> <- <FM5 media path>"): either side may go inside a zip, e.g.
+    # imports ("<FH2 media path> <- <source media path>"): from FM5, or with an "fh2:" source from the base game
+    # (e.g. to repackage a file the game already has). Either side may go inside a zip, e.g.
     #   stripped\RC0.zip\Thumbnail_1065_Big.swatchbin <- ui\textures\data_bound\Feb14Update.zip\Thumbnail_1065_Big.swatchbin
+    #   cars\_library\scene\wheels\TOY_2000GT_69.zip\TOY_2000GT_69_wheelLF.modelbin <- fh2:cars\TOY_2000GT_69.zip\scene\_library\Scene\Wheels\TOY_2000GT_69_WheelLF.modelbin
+    # A destination zip the base doesn't have is created.
     if (Test-Path "$modDir\imports.txt") {
-      if (-not $Fm5Media) { throw "$m imports FM5 files: pass -Fm5Media <FM5 Mount\media folder> or set FH2_FM5_MEDIA" }
-      foreach ($line in Get-Content "$modDir\imports.txt" | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) {
+      $lines = @(Get-Content "$modDir\imports.txt" | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') })
+      if (-not $Fm5Media -and ($lines | Where-Object { $_ -notmatch '<-\s*fh2:' })) { throw "$m imports FM5 files: pass -Fm5Media <FM5 Mount\media folder> or set FH2_FM5_MEDIA" }
+      $n = 0
+      foreach ($line in $lines) {
         $dest, $from = $line -split '\s*<-\s*', 2
         $dest = $dest.Trim(); $from = if ($from) { $from.Trim() } else { $dest }
-        Write-Host "IMPORT   $m\$dest"
+        $n++; if ($lines.Count -le 20 -or $n % 100 -eq 0 -or $n -eq $lines.Count) { Write-Host "IMPORT   $m\$dest ($n/$($lines.Count))" }
         $tmp = Join-Path $work ("import\" + [IO.Path]::GetRandomFileName())
-        Read-Fm5 $from $tmp
+        if ($from -match '^fh2:(.+)$') {
+          $src = $Matches[1]
+          if ($src -match '^(.*?\.zip)\\(.+)$') { Copy-StockEntry "media\$($Matches[1])" $Matches[2] $tmp } else { Copy-StockFile "media\$src" $tmp }
+        } else { Read-Fm5 $from $tmp }
         if ($dest -match '^(.*?\.zip)\\(.+)$' -and $Matches[2]) {
           $zr = $Matches[1]; $entry = $Matches[2]
           Use-Zip $zr

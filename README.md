@@ -18,7 +18,7 @@ mods/<name>/
     <Archive>.zip/<entry>                   a folder named like a zip holds replacement/new entries for that zip
     stripped/gamedbRC.slt/<patch>.sql       a folder named like a .slt holds SQL patches, applied in name order
     <path>/<file>                           anything else is a loose file, copied as-is
-  imports.txt                             FM5 files to copy in: "<FH2 media path> <- <FM5 media path>" (a .zip segment = entry inside it)
+  imports.txt                             files to copy in: "<FH2 media path> <- <FM5 media path>", or "<- fh2:<path>" to take one from the base game (a .zip segment = entry inside it; missing zips are created)
   index-donors.txt                        for each new file, the stock file whose hash.manifest metadata it reuses
 tools/
   Repack-ForzaZip.ps1                     repacks a media zip in FH2's native format and updates zipmanifest.xml
@@ -45,7 +45,7 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 - `-Package` can be set once via the `FH2_PACKAGE` environment variable.
 - SQL patches need [sqlite3.exe](https://www.sqlite.org/download.html) (the "sqlite-tools" bundle): pass `-Sqlite <path>`, set `FH2_SQLITE`, or put it on `PATH`.
 - Mods apply in the order given; on conflicts the later mod wins. Output goes to `dist/`.
-- Mods with an `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
+- Mods with FM5 sources in `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
 
 Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game and Azimuth versions, refuses to overwrite files that differ from the base unless `-Force`, backs up what it replaces, and patches `azimuth.exe` (stock, or already patched by another mod) when the mod ships a `hash.manifest`; the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
 
