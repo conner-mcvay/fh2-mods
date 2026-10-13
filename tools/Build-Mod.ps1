@@ -10,6 +10,7 @@
 
   Stock zips, databases and zipmanifest.xml are read from the game package (.zip of the Anthem_* folder) or from a
   game folder whose files are verified against tools\stock-hashes.json, so a build never starts from a modded file.
+  -Layer -Game <folder> instead builds on top of what's installed there (e.g. earlier car imports), so mods stack.
   Mods are applied in the order given, so several mods can patch the same zip or database; later mods win on conflicts.
 
   Output: dist\<name>.zip with the changed media files, zipmanifest.xml (if any zip changed), README.txt
@@ -25,6 +26,8 @@ param(
   [string]$Name,
   [string]$Package = $env:FH2_PACKAGE,   # stock source: the game package zip...
   [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
+  [switch]$Layer,                        # with -Game: build on top of the installed files (other mods included); the
+                                         #   result installs only onto exactly that state
   [string]$Sqlite = $env:FH2_SQLITE,
   [string]$Fm5Media = $env:FH2_FM5_MEDIA
 )
@@ -32,7 +35,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot 'StockSource.ps1')
 if (-not $Name) { if ($Mod.Count -eq 1) { $Name = $Mod[0] } else { throw 'Pass -Name when building several mods together' } }
-if ($Game) { Open-StockSource -Game $Game } else { Open-StockSource -Package $Package }
+if ($Game) { Open-StockSource -Game $Game -Layer:$Layer } else { Open-StockSource -Package $Package }
 
 $root = Split-Path $PSScriptRoot
 $modsRoot = if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }   # generated mods can live outside the repo
@@ -166,7 +169,7 @@ try {
     # the converter reads FH2's material and shader libraries to learn what each mesh's shader needs
     foreach ($lib in 'cars\_library\Materials.zip', '_library\Shaders.zip') { Get-Stock $lib (Join-Path $work "stock\$lib") }
   }
-  # the stock file index decides what's stock: a media file is stock exactly when its path key is in it
+  # the base file index decides what's new: a media file is new exactly when its path key isn't in it
   Copy-StockFile 'hash.manifest' (Join-Path $work 'stock\hash.manifest')
   $stockIndex = [IO.File]::ReadAllBytes((Join-Path $work 'stock\hash.manifest'))
 } finally { }
@@ -259,22 +262,22 @@ if ($new.Count) {
   Write-Host "Wrote hash.manifest ($($out.Length) bytes, SHA-256 $sha); azimuth.exe must be patched to match (tools\Patch-Azimuth.ps1)"
 }
 
-# install.json + Install.ps1/Uninstall.ps1: every payload file with its hash and the hash of the stock file it replaces
+# install.json + Install.ps1/Uninstall.ps1: every payload file with its hash and the hash of the base file it replaces
+# (the stock file, or with -Layer the installed one; $null = the base has no such file)
 function Get-Sha([byte[]]$b) { -join ([Security.Cryptography.SHA256]::Create().ComputeHash($b) | ForEach-Object { $_.ToString('x2') }) }
 $payload = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring($build.Length + 1) })
 if (Test-Path "$build\hash.manifest") { $payload += 'hash.manifest' }
 try {
   $files = foreach ($p in $payload) {
-    $isStock = ($p -eq 'hash.manifest') -or $stockKeys.Contains([ForzaPathKey]::Compute($p))
-    $stockSha = if ($isStock) { Get-StockHash $p } else { $null }
-    if ($isStock -and -not $stockSha) { Write-Warning "No stock hash for Mount\$p; the installer will treat it as a new file" }
-    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); stock_sha256 = $stockSha }
+    $baseSha = if ($Layer) { Get-BaseHash $p } elseif (($p -eq 'hash.manifest') -or $stockKeys.Contains([ForzaPathKey]::Compute($p))) { Get-StockHash $p } else { $null }
+    if (-not $Layer -and -not $baseSha -and $stockKeys.Contains([ForzaPathKey]::Compute($p))) { Write-Warning "No stock hash for Mount\$p; the installer will treat it as a new file" }
+    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); base_sha256 = $baseSha }
   }
   $gameSha = Get-StockHash 'forza_durango_release_final.exe'
 } finally { Close-StockSource }
 $version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json).game -match '(\d+\.\d+\.\d+\.\d+)') { $Matches[1] } else { 'unknown' }
 [ordered]@{
-  name = $Name; mods = $Mod; game_version = $version; game_exe_sha256 = $gameSha
+  name = $Name; mods = $Mod; layered = [bool]$Layer; game_version = $version; game_exe_sha256 = $gameSha
   azimuth_version = '0.9.7'; azimuth_stock_sha256 = '5d3ce30b440dab2604fe42ff7cd129394f0b98418e22b2a44270f548199bc6a9'
   files = @($files)
 } | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
@@ -290,10 +293,12 @@ Close Azimuth, then in PowerShell from this folder:
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "<folder containing Mount>" -AzimuthRoot "<folder containing azimuth.exe>"
 
 It checks your game and Azimuth versions, refuses to overwrite files another mod changed (unless you add -Force),
-backs up everything it replaces$(if (Test-Path "$build\hash.manifest") { ', and patches azimuth.exe to accept this mod''s new files (your stock launcher is kept as azimuth.stock.exe)' }).
+backs up everything it replaces$(if (Test-Path "$build\hash.manifest") { ', and patches azimuth.exe to accept this mod''s new files' }).
 It prints the backup folder. To undo:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot "<printed backup folder>"
+
+With several mods installed, uninstall them newest first.
 "@
 Add-Content "$build\README.txt" $installText
 

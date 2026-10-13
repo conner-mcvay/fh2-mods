@@ -3,16 +3,17 @@
   Imports Forza Motorsport 5 cars into Forza Horizon 2 (PC / Azimuth) from your own FM5 and FH2 installs.
 
 .DESCRIPTION
-  Ships no game files: everything is read from your FM5 folder and your (stock) FH2 folder. For each car you pick, it
-  generates the database rows, converts the car's models for FH2's shaders, builds one combined install and installs it
-  with backups (Install.ps1).
+  Ships no game files: everything is read from your FM5 folder and your FH2 folder. For each car you pick, it
+  generates the database rows, converts the car's models for FH2's shaders, builds one install on top of your current
+  game files and installs it with backups (Install.ps1).
 
   Run it with no parameters (or double-click Import-Fm5Cars.cmd) to be asked for everything: your folders (remembered),
   the FM5 cars to import (search by name), and per car an FH2 data donor (FH2-only car data and Autoshow group - pick
   something similar) and a sound donor (an FH2 car whose engine sound it uses).
 
-  Each run replaces the previous import (it uninstalls it first), so the car list is always the full set you want;
-  interactive mode offers to keep the cars already imported. Requires FH2 1.0.0.64 on Azimuth 0.9.7 and FM5 1.0.0.20.
+  Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb, other
+  mods), and cars the game already has aren't offered. Each run gets its own backup folder (mod-backups\<Name>-<time>)
+  with an Uninstall.ps1; undo runs newest first. Requires FH2 1.0.0.64 on Azimuth 0.9.7 and FM5 1.0.0.20.
   sqlite3.exe is downloaded from sqlite.org (hash-checked) if it isn't on PATH.
 
 .EXAMPLE
@@ -90,14 +91,11 @@ if (-not $Sqlite) {
   Remove-Item "$tools\bin\sqlite-tools.zip"; $Sqlite = "$tools\bin\sqlite3.exe"
 }
 
-# --- car lists. Cars this tool imported before don't count as FH2 cars (they're replaced on every run) ---
-# this tool's previous import still in place? (its backup's restore.json matches the installed files)
-$prev = Get-ChildItem (Join-Path $GameRoot 'mod-backups') -Directory -Filter "$Name-*" -ErrorAction SilentlyContinue | Sort-Object Name -Descending |
-  Where-Object { $_.Name -notlike '*-uninstalled' -and (Test-Path (Join-Path $_.FullName 'restore.json')) } |
-  Where-Object { $r = Get-Content (Join-Path $_.FullName 'restore.json') -Raw | ConvertFrom-Json; -not ($r.files | Where-Object { $t = Join-Path $GameRoot "Mount\$($_.target)"; -not (Test-Path $t) -or (Sha $t) -ne $_.installed_sha256 }) } |
-  Select-Object -First 1
-$statePath = Join-Path $GameRoot "mod-backups\$Name-cars.json"
-$state = @(if ($prev -and (Test-Path $statePath)) { Get-Content $statePath -Raw | ConvertFrom-Json | ForEach-Object { $_ } })
+# --- car lists. Every run adds a layer on top of the installed game (earlier imports and other mods stay) ---
+# cars imported by earlier runs that are still installed (each run's backup folder has cars.json)
+$layers = @(Get-ChildItem (Join-Path $GameRoot 'mod-backups') -Directory -ErrorAction SilentlyContinue | Sort-Object Name |
+  Where-Object { $_.Name -notlike '*-uninstalled' -and (Test-Path (Join-Path $_.FullName 'cars.json')) -and -not (Test-Path (Join-Path $_.FullName 'uninstalled.txt')) })
+$state = @($layers | ForEach-Object { $l = $_; (Get-Content (Join-Path $l.FullName 'cars.json') -Raw | ConvertFrom-Json) | ForEach-Object { $_ | Add-Member -NotePropertyName layer -NotePropertyValue $l.FullName -PassThru } })
 $importedIds = @($state | ForEach-Object { $_.id }) + -1
 $fhDb = (Join-Path $GameRoot 'Mount\media\stripped\gamedbRC.slt').Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
 function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sql (PowerShell 5.1 native argument quirk)
@@ -105,10 +103,10 @@ function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sq
   if ($LASTEXITCODE -ne 0) { throw "sqlite3 failed: $sql" }
   , @($out | ForEach-Object { , ($_.TrimEnd("`r").Split('|')) })   # always a list of rows, even for one row
 }
-$notImported = "Id NOT IN ($($importedIds -join ','))"
-$fm5Only = Q "SELECT Id, MediaName, Year, MakeID FROM fm.Data_Car WHERE (Id NOT IN (SELECT Id FROM fh.Data_Car WHERE $notImported) AND MediaName NOT IN (SELECT MediaName FROM fh.Data_Car WHERE $notImported)) ORDER BY MediaName"
+# FM5 cars the game doesn't have yet (stock or imported); donors are FH2's own cars
+$fm5Only = Q "SELECT Id, MediaName, Year, MakeID FROM fm.Data_Car WHERE Id NOT IN (SELECT Id FROM fh.Data_Car) AND MediaName NOT IN (SELECT MediaName FROM fh.Data_Car) ORDER BY MediaName"
 if ($ListFm5Only) { $fm5Only | ForEach-Object { '{0,5}  {1,-30} {2}' -f $_[0], $_[1], $_[2] }; return }
-$fh2Cars = Q "SELECT Id, MediaName, Year, MakeID FROM fh.Data_Car WHERE $notImported ORDER BY MediaName"
+$fh2Cars = Q "SELECT Id, MediaName, Year, MakeID FROM fh.Data_Car WHERE Id NOT IN ($($importedIds -join ',')) ORDER BY MediaName"
 function Engine-Of([string]$fh2Car) {   # stock engine sound (engine MediaName) of an FH2 car (MediaName or Id)
   $w = if ($fh2Car -match '^\d+$') { "c.Id = $fh2Car" } else { "c.MediaName = '$($fh2Car.Replace("'", ''))' COLLATE NOCASE" }
   $r = Q "SELECT e.MediaName FROM fh.Data_Car c JOIN fh.List_UpgradeEngine u ON u.Ordinal = c.Id JOIN fh.Data_Engine e ON e.EngineID = u.EngineID WHERE $w ORDER BY u.IsStock DESC, u.Level LIMIT 1"
@@ -140,10 +138,8 @@ function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$Allow
 $plan = @()   # @{ id; car; donor; soundCar; engine }
 if ($interactive) {
   if ($state.Count) {
-    Write-Host "`nCurrently imported:"
+    Write-Host "`nAlready imported (they stay; the new cars are added on top):"
     $state | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2}" -f $_.car, $_.donor, $_.soundCar) }
-    $keep = Ask 'Keep these in the import? [Y/n]'
-    if ($keep -notmatch '^(n|no)$') { $plan += @($state | ForEach-Object { @{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine } }) }
   }
   Write-Host "`nPick FM5 cars to import. Type part of a name (e.g. transam, 'mustang 2005'); a number picks from the list."
   while ($true) {
@@ -176,18 +172,7 @@ if ($interactive) {
 }
 if (-not $AzimuthRoot -and -not $NoInstall) { throw 'Pass -AzimuthRoot <folder containing azimuth.exe>' }
 
-# --- undo this tool's previous import, so the build starts from stock files ---
-if (-not $NoInstall) {
-
-  if ($prev) {
-    Write-Host "`nUninstalling previous import ($($prev.Name))"
-    & (Join-Path $prev.FullName 'Uninstall.ps1') -BackupRoot $prev.FullName
-    Rename-Item $prev.FullName ($prev.Name + '-uninstalled')
-    if (Test-Path $statePath) { Remove-Item $statePath }
-  }
-}
-
-# --- generate one mod per car in a private workspace, build one combined install ---
+# --- generate one mod per car in a private workspace, build one install on top of the current game files ---
 $ws = Join-Path $root "build\.import-$Name"
 if (Test-Path $ws) { Remove-Item -Recurse -Force $ws }
 New-Item -ItemType Directory $ws | Out-Null
@@ -197,7 +182,7 @@ try {
   for ($i = 0; $i -lt $plan.Count; $i++) {
     $p = $plan[$i]
     $mod = 'car' + ($i + 1) + '-' + ($p.car -replace '[^\w-]', '').ToLower()
-    $a = @{ Car = $p.car; Mod = $mod; Fm5Media = $fm5Media; Game = $GameRoot; Sqlite = $Sqlite }
+    $a = @{ Car = $p.car; Mod = $mod; Fm5Media = $fm5Media; Game = $GameRoot; Layer = $true; Sqlite = $Sqlite }
     if ($p.donor) { $a.Donor = $p.donor }
     if ($p.engine) { $a.EngineSound = $p.engine }
     Write-Host ''
@@ -206,14 +191,17 @@ try {
     $mods += $mod
   }
   Write-Host "`nBuilding (converting models for FH2 takes a minute per car)..."
-  & (Join-Path $tools 'Build-Mod.ps1') -Mod $mods -Name $Name -Game $GameRoot -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
+  & (Join-Path $tools 'Build-Mod.ps1') -Mod $mods -Name $Name -Game $GameRoot -Layer -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
     Where-Object { "$_" -match '^(MODELS|Built)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
 } finally { Remove-Item Env:FH2_MODS_ROOT }
 
 $release = Join-Path $root "build\$Name"
 if ($NoInstall) { Write-Host "Built $release (not installed)"; return }
 Write-Host ''
-& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -AzimuthRoot $AzimuthRoot
-# remember what's imported (for the next run's "keep these?")
-ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine } }) | Set-Content $statePath -Encoding UTF8
+$installed = @(& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -AzimuthRoot $AzimuthRoot)
+$installed | ForEach-Object { Write-Host "$_" }
+$backup = ($installed | Where-Object { "$_" -like 'Backup: *' } | Select-Object -First 1) -replace '^Backup: '
+# remember what this layer imported (for later runs and for undoing it)
+ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
 Write-Host "`nDone. Start the game through azimuth.exe; the cars are in the Autoshow."
+Write-Host "Each import is undone separately, newest first, with the Uninstall.ps1 in its backup folder."

@@ -1,9 +1,10 @@
-# Stock FH2 files for builds: from the game package (.zip of the Anthem_* folder) or from a game folder (the one
+# Base FH2 files for builds: from the game package (.zip of the Anthem_* folder) or from a game folder (the one
 # containing Mount). Game-folder files are checked against stock-hashes.json, so a build never starts from a modded
-# file. Paths are relative to Mount ("media\zipmanifest.xml", "hash.manifest"). Dot-source, then Open-StockSource.
+# file - unless -Layer: then the build goes on top of whatever is installed, so mods stack (the game exe must still be
+# stock). Paths are relative to Mount ("media\zipmanifest.xml", "hash.manifest"). Dot-source, then Open-StockSource.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
-function Open-StockSource([string]$Package, [string]$Game) {
+function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
   $hashes = @{}
   $table = Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json
   foreach ($p in $table.files.PSObject.Properties) { $hashes[$p.Name.ToLowerInvariant()] = $p.Value }
@@ -15,8 +16,10 @@ function Open-StockSource([string]$Package, [string]$Game) {
   } elseif ($Game) {
     $mount = Join-Path (Resolve-Path $Game).Path 'Mount'
     if (-not (Test-Path (Join-Path $mount 'forza_durango_release_final.exe'))) { throw "Not an FH2 game folder (no Mount\forza_durango_release_final.exe): $Game" }
-    $script:Stock = @{ Kind = 'game'; Mount = $mount; Hashes = $hashes; Verified = @{} }
-  } else { throw 'Pass -Package <Anthem_*.zip> or -Game <folder containing Mount> (or set FH2_PACKAGE / FH2_GAME)' }
+    $exe = Join-Path $mount 'forza_durango_release_final.exe'
+    if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hashes['forza_durango_release_final.exe']) { throw "Unsupported game version (Mount\forza_durango_release_final.exe isn't the one this tool knows): $Game" }
+    $script:Stock = @{ Kind = 'game'; Mount = $mount; Hashes = $hashes; Verified = @{}; Layer = [bool]$Layer }
+  } elseif ($Layer) { throw '-Layer needs -Game' } else { throw 'Pass -Package <Anthem_*.zip> or -Game <folder containing Mount> (or set FH2_PACKAGE / FH2_GAME)' }
 }
 
 function Close-StockSource { if ($script:Stock -and $script:Stock.Zip) { $script:Stock.Zip.Dispose() }; $script:Stock = $null }
@@ -36,6 +39,13 @@ function Get-StockHash([string]$rel) {   # stock SHA-256 of a file, or $null whe
   return $null
 }
 
+function Get-BaseHash([string]$rel) {   # SHA-256 of the file a build starts from, or $null when the base has no such file
+  if (-not $script:Stock.Layer) { return Get-StockHash $rel }
+  $p = Join-Path $script:Stock.Mount $rel
+  if (Test-Path -LiteralPath $p) { return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+  return $null
+}
+
 function Copy-StockFile([string]$rel, [string]$dest) {
   $k = $rel.ToLowerInvariant()
   New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null
@@ -46,7 +56,8 @@ function Copy-StockFile([string]$rel, [string]$dest) {
   $src = Join-Path $script:Stock.Mount $rel
   if (-not (Test-Path $src)) { throw "Stock file not found in game folder: Mount\$rel" }
   $want = $script:Stock.Hashes[$k]
-  if (-not $want) { Write-Warning "No stock hash known for Mount\$rel; can't verify it's unmodified" }
+  if ($script:Stock.Layer) { }   # building on top of installed mods: take the file as it is
+  elseif (-not $want) { Write-Warning "No stock hash known for Mount\$rel; can't verify it's unmodified" }
   elseif (-not $script:Stock.Verified.ContainsKey($k)) {
     $have = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
     if ($have -ne $want) { throw "Mount\$rel isn't the stock file (another mod changed it). Uninstall that mod first, or point -Game at a clean copy." }

@@ -4,9 +4,10 @@
 
 .DESCRIPTION
   Reads install.json next to this script. Checks the game and Azimuth versions, refuses to overwrite files another
-  mod already changed (unless -Force), backs up every file it replaces, copies the mod's files in, and - when the mod
-  adds files the game doesn't have - patches azimuth.exe to accept the mod's Mount\hash.manifest (the stock launcher is
-  kept as azimuth.stock.exe). Prints the backup folder; pass it to Uninstall.ps1 to undo.
+  mod already changed (unless -Force; a layered package expects exactly the files it was built on), backs up every
+  file it replaces, copies the mod's files in, and - when the mod adds files the game doesn't have - patches
+  azimuth.exe to accept the mod's Mount\hash.manifest. Prints the backup folder; pass it to Uninstall.ps1 to undo
+  (with several mods installed, newest first).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" -AzimuthRoot "D:\azimuth"
@@ -31,24 +32,33 @@ if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.P
 # payload integrity
 foreach ($f in $m.files) { if ((Sha (Join-Path $pkg $f.source)) -ne $f.sha256) { throw "Corrupt package file: $($f.source)" } }
 
-# targets must be stock (or absent for new files) unless -Force
+# targets must be what the package was built on (stock, or for a layered build the files installed then;
+# absent for new files) unless -Force
 $conflicts = @()
 foreach ($f in $m.files) {
   $t = Join-Path $mount $f.target
-  if ($f.stock_sha256) { if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $f.stock_sha256) { $conflicts += $f.target } }
+  $base = if ($f.PSObject.Properties['base_sha256']) { $f.base_sha256 } else { $f.stock_sha256 }
+  if ($base) { if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $base) { $conflicts += $f.target } }
   elseif (Test-Path -LiteralPath $t) { $conflicts += $f.target }
 }
 if ($conflicts.Count -and -not $Force) {
+  if ($m.layered) { throw ("These game files changed since this package was built on top of them (installing would undo that):`n  " + ($conflicts -join "`n  ") + "`nBuild it again, or pass -Force.") }
   throw ("These files aren't stock (another mod may have changed them; installing would undo it):`n  " + ($conflicts -join "`n  ") + "`nUninstall that mod first, build the mods together from the fh2-mods repo, or pass -Force.")
 }
 
-# azimuth: needs patching only when the mod ships a hash.manifest
+# azimuth: needs patching only when the mod ships a hash.manifest. Any 0.9.7 launcher works, stock or patched by
+# an earlier mod; the patched copy is prepared now so nothing changes if that fails
 $azExe = Join-Path $AzimuthRoot 'azimuth.exe'; $azStock = Join-Path $AzimuthRoot 'azimuth.stock.exe'
 $index = $m.files | Where-Object { $_.target -eq 'hash.manifest' }
+$azNew = $null
 if ($index) {
   if (-not (Test-Path -LiteralPath $azExe)) { throw "azimuth.exe not found in $AzimuthRoot" }
-  $haveStock = if ((Sha $azExe) -eq $m.azimuth_stock_sha256) { $azExe } elseif ((Test-Path -LiteralPath $azStock) -and (Sha $azStock) -eq $m.azimuth_stock_sha256) { $azStock } else { $null }
-  if (-not $haveStock) { throw "Needs the stock Azimuth $($m.azimuth_version) launcher (azimuth.exe or azimuth.stock.exe with SHA-256 $($m.azimuth_stock_sha256))" }
+  $azNew = Join-Path ([IO.Path]::GetTempPath()) ("azimuth-" + [IO.Path]::GetRandomFileName() + '.exe')
+  foreach ($src in $azExe, $azStock) {   # azimuth.stock.exe: kept by earlier versions of this installer
+    if (-not (Test-Path -LiteralPath $src)) { continue }
+    try { & (Join-Path $pkg 'tools\Patch-Azimuth.ps1') -Azimuth $src -Index (Join-Path $pkg $index.source) -Out $azNew 6>$null | Out-Null; break } catch { }
+  }
+  if (-not (Test-Path -LiteralPath $azNew)) { throw "Needs the Azimuth $($m.azimuth_version) launcher (stock, or patched by another mod); $azExe is a different build" }
 }
 
 # back up, then install
@@ -66,9 +76,9 @@ try {
   }
   $az = $null
   if ($index) {
-    if (-not (Test-Path -LiteralPath $azStock)) { Copy-Item -LiteralPath $haveStock -Destination $azStock }
     Copy-Item -LiteralPath $azExe -Destination (Join-Path $backup 'azimuth.exe')
-    & (Join-Path $pkg 'tools\Patch-Azimuth.ps1') -Azimuth $azStock -Index (Join-Path $mount 'hash.manifest') -Out $azExe | Out-Host
+    Copy-Item -LiteralPath $azNew -Destination $azExe -Force
+    Write-Host "Patched azimuth.exe for the new Mount\hash.manifest"
     $az = [pscustomobject]@{ backup = 'azimuth.exe'; backup_sha256 = (Sha (Join-Path $backup 'azimuth.exe')); installed_sha256 = (Sha $azExe) }
   }
   [pscustomobject]@{ mod = $m.name; game_root = $GameRoot; azimuth_root = $AzimuthRoot; files = $record; azimuth = $az } |
@@ -82,7 +92,7 @@ try {
   }
   if (Test-Path -LiteralPath (Join-Path $backup 'azimuth.exe')) { Copy-Item -LiteralPath (Join-Path $backup 'azimuth.exe') -Destination $azExe -Force }
   throw
-}
+} finally { if ($azNew -and (Test-Path -LiteralPath $azNew)) { Remove-Item -LiteralPath $azNew } }
 Write-Output "Installed $($m.name)."
 Write-Output "Backup: $backup"
 Write-Output "To undo: powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot `"$backup`""

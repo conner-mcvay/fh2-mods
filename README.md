@@ -46,7 +46,9 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 - Mods apply in the order given; on conflicts the later mod wins. Output goes to `dist/`.
 - Mods with an `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
 
-Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the stock file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game and Azimuth versions, refuses to overwrite non-stock files unless `-Force`, backs up what it replaces, and patches `azimuth.exe` when the mod ships a `hash.manifest`; the uninstaller restores everything, refusing if files changed since.
+Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game and Azimuth versions, refuses to overwrite files that differ from the base unless `-Force`, backs up what it replaces, and patches `azimuth.exe` (stock, or already patched by another mod) when the mod ships a `hash.manifest`; the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
+
+`Build-Mod.ps1 -Layer -Game <folder>` builds on top of what's installed in that game folder (earlier car imports, a modded gamedb) instead of stock files, so mods stack. Such a release installs only onto exactly that state.
 
 ## Adding new files (imported cars)
 
@@ -54,17 +56,17 @@ Azimuth only exposes files listed in `Mount\hash.manifest`, its file index. A ne
 
 - Record: `u64` path key + `u32` metadata, little endian. The key is a DJB2-style mix run twice over the lowercase `media\...` path (see `tools/ForzaPathKey.cs`). It matches 2,312 of the 2,314 stock files, and the same function gives the same keys in FM5's own index.
 - The metadata's meaning is unknown. New files copy it from a similar stock file (`index-donors.txt`), as the working GT500 import did.
-- Azimuth 0.9.7 checks the index's exact size and SHA-256. `Patch-Azimuth.ps1` writes both into a copy of the stock launcher: the SHA-256 as ASCII hex at raw offset `0x252910`, the size as the `imm32` of `cmp qword [rbp-0x48]` at `0x1C06E8`. Keep the patched launcher named `azimuth.exe` (FH2_ExtraOptions checks the name). Restore the stock launcher together with the stock index.
+- Azimuth 0.9.7 checks the index's exact size and SHA-256. `Patch-Azimuth.ps1` writes both into a copy of the launcher: the SHA-256 as ASCII hex at raw offset `0x252910`, the size as the `imm32` of `cmp qword [rbp-0x48]` at `0x1C06E8`. It accepts the stock launcher or one already patched this way (recognized by its SHA-256 with those two spots blanked). Keep the patched launcher named `azimuth.exe` (FH2_ExtraOptions checks the name). Restore the stock launcher together with the stock index.
 
-The release's `Install.ps1` does this; by hand: install a build's `media\*` into `Mount\media`, its `hash.manifest` into `Mount`, then patch `azimuth.exe` from your untouched stock copy:
+The release's `Install.ps1` does this; by hand: install a build's `media\*` into `Mount\media`, its `hash.manifest` into `Mount`, then patch `azimuth.exe`:
 
 ```powershell
-.\tools\Patch-Azimuth.ps1 -Azimuth <stock azimuth.exe> -Index <Mount\hash.manifest> -Out <azimuth folder>\azimuth.exe
+.\tools\Patch-Azimuth.ps1 -Azimuth <azimuth folder>\azimuth.exe -Index <Mount\hash.manifest> -Out <azimuth folder>\azimuth.exe
 ```
 
 ## Importing FM5 cars (end users)
 
-**Double-click `Import-Fm5Cars.cmd`** (or run `tools\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) and a **sound donor** (any FH2 car whose engine sound to use). On later runs it offers to keep the cars already imported. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 (stock files, or this tool's previous import) on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
+**Double-click `Import-Fm5Cars.cmd`** (or run `tools\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) and a **sound donor** (any FH2 car whose engine sound to use). Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb), and cars the game already has aren't offered. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
 
 ```powershell
 # which FM5 cars FH2 doesn't have
@@ -75,7 +77,7 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
     -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,""
 ```
 
-It verifies the game files it reads are stock (`tools\stock-hashes.json`, hashes only), generates each car's mod in a private workspace, builds one combined install (models converted for FH2's shaders), and installs it with backups. Running it again uninstalls the previous import first, so pass the full car list every time. Undo with the `Uninstall.ps1` kept in the printed backup folder. `-NoInstall` builds only.
+It checks the game version, generates each car's mod in a private workspace, builds one install on top of your current game files (models converted for FH2's shaders), and installs it with backups. Each run gets its own backup folder (`mod-backups\fm5-cars-<time>`, with the run's car list in `cars.json`); undo a run with the `Uninstall.ps1` kept there, newest run first. `-NoInstall` builds only.
 
 ## Importing FM5 cars (repo mods)
 

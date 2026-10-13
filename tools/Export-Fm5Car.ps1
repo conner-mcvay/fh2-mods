@@ -34,6 +34,7 @@ param(
   [int]$Bucket,                     # FH2 CarBuckets.Id (Autoshow class group); default: the donor's bucket
   [string]$Package = $env:FH2_PACKAGE,   # stock FH2 source: the game package zip...
   [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
+  [switch]$Layer,                        # with -Game: build on the installed (possibly modded) files, e.g. earlier imports
   [string]$Sqlite = $env:FH2_SQLITE
 )
 $ErrorActionPreference = 'Stop'
@@ -45,15 +46,15 @@ if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue
 if (-not $Sqlite) { throw 'Need sqlite3.exe: pass -Sqlite, set FH2_SQLITE, or put it on PATH' }
 $root = Split-Path $PSScriptRoot
 
-# --- stock FH2 database; sound banks / audio xml FH2 ships (from the stock file list, so earlier imports don't count) ---
+# --- base FH2 database; sound banks / audio xml the base has (stock, or as installed with -Layer) ---
 $tmp = Join-Path $root 'build\.export'
 New-Item -ItemType Directory $tmp -Force | Out-Null
 $fh2Db = Join-Path $tmp 'gamedbRC.slt'
-if ($Game) { Open-StockSource -Game $Game } else { Open-StockSource -Package $Package }
+if ($Game) { Open-StockSource -Game $Game -Layer:$Layer } else { Open-StockSource -Package $Package }
 try {
   Copy-StockFile 'media\stripped\gamedbRC.slt' $fh2Db
   $banks = @{}; $audioXml = @{}
-  foreach ($k in $script:Stock.Hashes.Keys) {
+  foreach ($k in @($script:Stock.Hashes.Keys) + $(if ($Layer) { Get-StockList })) {
     if ($k -match '^media\\audio\\fmodanthem\\durango\\pg_(.+)\.bank$') { $banks[$Matches[1]] = 1 }
     elseif ($k -match '^media\\audio\\cars\\(.+)\.xml$') { $audioXml[$Matches[1]] = 1 }
   }
