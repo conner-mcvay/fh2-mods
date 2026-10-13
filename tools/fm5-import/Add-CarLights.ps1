@@ -102,9 +102,20 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   $lf = [LightsFile]::Read($D['lights.bin'])
   Write-Host "$c <- lights of $dn"
 
+  # skeleton bones (name -> index) of both cars: a lamp's id is the index of the bone it hangs on (1 = root,
+  # boneHeadlightL/R for pop-ups), and bone order differs between cars
+  $boneIndex = { param($entries) $k = $entries.Keys | Where-Object { $_ -match '^scene/[^/]+_skeleton\.modelbin$' } | Select-Object -First 1
+    $l = @(); if ($k) { $l = @([Skeleton]::Read($entries[$k]) | ForEach-Object { $_.Name.ToLower() }) }; , $l }
+  $donorBoneNames = & $boneIndex $D; $carBoneNames = & $boneIndex $T
+
   # lamp meshes: same list order (light records refer to it by index), donor paths swapped for the car's own models
   $map = @()
   foreach ($m in $lf.Meshes) {
+    if ($m.Id -lt $donorBoneNames.Count) {
+      $bone = $donorBoneNames[$m.Id]; $ci2 = [array]::IndexOf($carBoneNames, $bone)
+      if ($ci2 -lt 0) { throw "$c has no bone $bone (the donor's lamp $($m.Path) hangs on it)" }
+      $m.Id = [uint16]$ci2
+    }
     $rel = ($m.Path -replace '^game:\\media\\cars\\[^\\]+\\', '').Replace('\', '/').ToLower()
     $lamp = Match-Mesh $m.Path $targetModels   # (not $t: PowerShell names are case-insensitive, $T is the car's files)
     if (-not $lamp) { $lamp = ($targetModels | Where-Object { (Role $_).Kind -eq (Role $rel).Kind } | Select-Object -First 1) }
@@ -113,6 +124,19 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     $m.Path = "game:\media\cars\$($c.ToLower())\" + $lamp.Replace('/', '\')
     Write-Host ("  lamp [{0,2}] {1,-44} -> {2}" -f $m.Id, ($rel -replace '^scene/exterior/', ''), ($lamp -replace '^scene/exterior/', ''))
   }
+  # a donor headlight glass with no glass on the car (lens modelled into the housing, e.g. the FM5 2002 Trans Am):
+  # also list the car's housing on the same bone. Appended, so the light records' mesh indices stay valid.
+  $extra = @()
+  for ($k = 0; $k -lt $map.Count; $k++) {
+    $r = Role $map[$k].Donor
+    if ($r.Kind -ne 'head' -or $r.Part -ne 'glass' -or (Role $map[$k].Target).Part -eq 'glass') { continue }
+    $housing = $targetModels | Where-Object { $x = Role $_; $x.Kind -eq 'head' -and $x.Side -eq $r.Side -and $x.Part -eq 'main' } | Sort-Object | Select-Object -First 1
+    if ($housing -and $housing -ne $map[$k].Target) {
+      $extra += New-Object LightMesh -Property @{ Path = "game:\media\cars\$($c.ToLower())\" + $housing.Replace('/', '\'); Id = $lf.Meshes[$k].Id }
+      Write-Host ("  lamp [{0,2}] (also)                                       -> {1}" -f $lf.Meshes[$k].Id, ($housing -replace '^scene/exterior/', ''))
+    }
+  }
+  foreach ($e in $extra) { $lf.Meshes.Add($e) }
 
   # light records: count, then 76 bytes each: u32 index, u16 kind, u16 sub, u32 lamp mesh index, 2 x (pos xyzw, rot xyzw)
   $rest = $lf.Rest; $n = [BitConverter]::ToInt32($rest, 0)
