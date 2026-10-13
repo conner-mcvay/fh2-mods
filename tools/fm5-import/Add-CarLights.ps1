@@ -94,7 +94,7 @@ function Match-Mesh([string]$donorPath, [string[]]$targetModels) {
   if (-not $cands -and $r.Kind -eq 'marker') { $cands = @($targetModels | Where-Object { (Role $_).Kind -eq 'marker' }) }
   if (-not $cands) { return $null }
   $order = @{ glass = @('glass', 'bulbs', 'main'); bulbs = @('bulbs', 'glass', 'main'); main = @('main', 'glass', 'bulbs') }[$r.Part]
-  ($cands | Sort-Object { [array]::IndexOf($order, (Role $_).Part) }, { $_ })[0]
+  @($cands | Sort-Object { [array]::IndexOf($order, (Role $_).Part) }, { $_ })[0]   # @(): one match would be a string, [0] its first char
 }
 
 $ws = Join-Path $root "build\.lights-$Name"; if (Test-Path $ws) { Remove-Item -Recurse -Force $ws }
