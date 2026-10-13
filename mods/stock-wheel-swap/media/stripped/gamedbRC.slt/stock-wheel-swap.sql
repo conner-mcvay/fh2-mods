@@ -431,5 +431,33 @@ UPDATE List_Wheels SET
                WHEN Mass <= 41.5 THEN 3400 WHEN Mass <= 46.0 THEN 3300 ELSE 3200 END
 WHERE IsStock = 1 AND MediaName IN (SELECT media FROM swap_wheel);
 
+-- The wheel shop only lists wheels with a WheelAnnotations row (category 1 is the car's own stock style).
+-- Category by the Autoshow group of the wheel's car, matching the aftermarket wheels already there:
+--   2 Sport Rim Style        Sports Cars, Hot Hatch, Track Toys, Iconic Rally
+--   3 (forged, HRE/OZ/BBS)   Supercars, GT Cars, luxury SUVs
+--   4 Specialized Rim Style  World Classics, Classic Muscle, Modern Muscle, Offroad
+-- Cars without a group: before 1980 -> 4, else 2. Listed after the existing wheels, by brand and model.
+INSERT INTO WheelAnnotations (WheelID, CategoryID, DisplayOrder)
+SELECT wid, cat,
+       (SELECT COALESCE(MAX(DisplayOrder), 0) FROM WheelAnnotations WHERE CategoryID = cat) + 100 * ROW_NUMBER() OVER (PARTITION BY cat ORDER BY media)
+FROM (
+  SELECT w.ID AS wid, w.MediaName AS media,
+    CASE
+      WHEN b.Id = 39 THEN 3
+      WHEN COALESCE(b.ParentBucketId, b.Id) IN (2, 4, 5, 8) THEN 2
+      WHEN COALESCE(b.ParentBucketId, b.Id) IN (1, 9) THEN 3
+      WHEN COALESCE(b.ParentBucketId, b.Id) IN (3, 6, 7, 10) THEN 4
+      WHEN c.Year < 1980 THEN 4
+      ELSE 2
+    END AS cat
+  FROM List_Wheels w
+  JOIN Data_Car c ON c.Id = COALESCE(
+    (SELECT Id FROM Data_Car WHERE MediaName = w.MediaName COLLATE NOCASE),
+    (SELECT Id FROM Data_Car WHERE StockWheelID = w.ID ORDER BY Id LIMIT 1))
+  LEFT JOIN Data_Car_Buckets cb ON cb.CarId = c.Id
+  LEFT JOIN CarBuckets b ON b.Id = cb.CarBucket
+  WHERE w.MediaName IN (SELECT media FROM swap_wheel) AND w.ID NOT IN (SELECT WheelID FROM WheelAnnotations)
+);
+
 DROP TABLE swap_wheel;
 DROP TABLE swap_brand;
