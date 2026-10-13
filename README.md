@@ -92,7 +92,8 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
 
 # or non-interactive: one data donor per car; -SoundCar "" = the data donor's sound; -Group "" = the data donor's group
 .\tools\fm5-import\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" -AzimuthRoot "D:\azimuth" `
-    -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,"" -Group 'Retro Muscle',""
+    -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,"" -Group 'Retro Muscle',"" `
+    -LightDonor PON_TransAmGTA_87,AST_DBSTF_08 -WhiterHeadlights
 ```
 
 It checks the game version, generates each car's mod in a private workspace, builds one install on top of your current game files (models converted for FH2's shaders), and installs it with backups. Each run gets its own backup folder (`mod-backups\fm5-cars-<time>`, with the run's car list in `cars.json`); undo a run with the `Uninstall.ps1` kept there, newest run first. `-NoInstall` builds only.
@@ -100,6 +101,8 @@ It checks the game version, generates each car's mod in a private workspace, bui
 Each imported car's stock wheel is also put in the wheel shop for any car, like [stock-wheel-swap](mods/stock-wheel-swap) does for FH2's cars (its own wheel zip, converted from FM5, named from FM5's string table; `tools\fm5-import\WheelSwap.ps1`). `-NoWheelSwap` on `Export-Fm5Car.ps1` skips it. For cars imported before this, run `tools\fm5-import\Add-ImportedCarWheels.ps1`: it finds imported cars (FM5 cars not in `tools\build\stock-cars.txt`) whose wheel isn't in the shop and installs their wheels as one more layer.
 
 ### Night lights (experimental)
+
+The importer asks for a **light donor** per car (default: the data donor, or the nearest car of the same make with lights; `none` skips) and, if that donor's headlights are the warm `HALOGEN_B`, whether to use whiter ones (the '87 GTA's `HALOGEN_A`). After the cars are installed it runs `Add-CarLights.ps1` for them as a second layer (`mod-backups\fm5-cars-lights-<time>`); undo that one first. Non-interactive: `-LightDonor` (one per car, `""` = none) and `-WhiterHeadlights`.
 
 FM5 cars have no night lighting data, so imported cars are dark at night. `tools\fm5-import\Add-CarLights.ps1 -Car <imported car> -Donor <FH2 car>` transplants it from a similar FH2 car (one with pop-ups for a pop-up car) and installs it as a layer:
 

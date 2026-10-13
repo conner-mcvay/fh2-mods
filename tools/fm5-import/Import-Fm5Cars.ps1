@@ -9,7 +9,8 @@
 
   Run it with no parameters (or double-click Import-Fm5Cars.cmd) to be asked for everything: your folders (remembered),
   the FM5 cars to import (search by name), and per car an FH2 data donor (FH2-only car data - pick something similar),
-  a sound donor (an FH2 car whose engine sound it uses) and the Autoshow group to list it in (default: the donor's).
+  a sound donor (an FH2 car whose engine sound it uses), the Autoshow group to list it in (default: the donor's) and a
+  light donor (an FH2 car with similar lamps whose night lights are fitted to it; Add-CarLights.ps1, as a second layer).
 
   Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb, other
   mods), and cars the game already has aren't offered. Each run gets its own backup folder (mod-backups\<Name>-<time>)
@@ -21,7 +22,7 @@
 .EXAMPLE
   .\tools\fm5-import\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" `
       -AzimuthRoot "D:\azimuth" -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,"" `
-      -Group 'Retro Muscle',""
+      -Group 'Retro Muscle',"" -LightDonor PON_TransAmGTA_87,AST_DBSTF_08 -WhiterHeadlights
 .EXAMPLE
   .\tools\fm5-import\Import-Fm5Cars.ps1 -ListFm5Only    # FM5 cars FH2 doesn't have
 #>
@@ -35,6 +36,8 @@ param(
   [string[]]$SoundCar,                       # FH2 car per car whose engine sound to use; "" = the data donor's
   [string[]]$EngineSound,                    # or the FH2 engine MediaName directly
   [string[]]$Group,                          # Autoshow group per car ('Modern Muscle', or its CarBuckets Id); "" = the data donor's
+  [string[]]$LightDonor,                     # FH2 car per car whose night lights to fit (Add-CarLights.ps1); "" = none
+  [switch]$WhiterHeadlights,                 # light donors with the warm HALOGEN_B headlights get the '87 GTA's whiter ones
   [string]$Name = 'fm5-cars',                # install name (backups are mod-backups\<Name>-<time>)
   [string]$Sqlite = $env:FH2_SQLITE,
   [switch]$ListFm5Only,                      # just list the FM5 cars FH2 doesn't have
@@ -146,12 +149,14 @@ function Pick-Group([object]$default) {   # numbered list; Enter keeps $default
   }
 }
 
-function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$AllowDone) {
-  # search by part of the name; a number picks from the last list shown; Enter takes the default (or finishes)
+function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$AllowDone, [switch]$AllowNone) {
+  # search by part of the name; a number picks from the last list shown; Enter takes the default (or finishes);
+  # with -AllowNone, "none" returns 'none'
   $shown = @()
   while ($true) {
     $p = if ($default) { "$prompt [$($default[1])]" } elseif ($AllowDone) { "$prompt (Enter when done)" } else { $prompt }
     $a = Ask $p
+    if ($AllowNone -and $a -ieq 'none') { return 'none' }
     if (-not $a) { if ($default) { return $default }; if ($AllowDone) { return $null }; continue }
     if ($a -match '^\d+$' -and $shown.Count -and [int]$a -ge 1 -and [int]$a -le $shown.Count) { return $shown[[int]$a - 1] }
     $exact = @($rows | Where-Object { $_[1] -ieq $a -or $_[0] -eq $a })
@@ -165,6 +170,24 @@ function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$Allow
     if ($hits.Count -gt 30) { Write-Host "  ... $($hits.Count - 30) more; type more of the name" }
   }
 }
+
+# night lights (FM5 cars have none): which FH2 cars have light data, and is their headlight the warm HALOGEN_B
+$lightInfo = @{}
+function Light-Info([string]$fh2Car) {
+  if ($lightInfo.ContainsKey($fh2Car)) { return $lightInfo[$fh2Car] }
+  $zp = Join-Path $GameRoot "Mount\media\cars\$fh2Car.zip"; $r = [pscustomobject]@{ Has = $false; Warm = $false }
+  if (Test-Path $zp) {
+    $z = [IO.Compression.ZipFile]::OpenRead($zp)
+    try {
+      $r.Has = [bool]($z.Entries | Where-Object FullName -eq 'Lights.bin')
+      $dbg = $z.Entries | Where-Object FullName -eq 'LightPresets.bin_debug'
+      if ($dbg) { $sr = New-Object IO.StreamReader($dbg.Open(), [Text.Encoding]::ASCII); $r.Warm = $sr.ReadToEnd() -match 'PG_Function_Headlight_HALOGEN_B'; $sr.Close() }
+    } finally { $z.Dispose() }
+  }
+  $lightInfo[$fh2Car] = $r; $r
+}
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$whiterFrom = 'PON_TransAmGTA_87'   # HALOGEN_A headlights (1.0, 0.8, 0.6), same preset layout
 
 # --- interactive selection ---
 $plan = @()   # @{ id; car; donor; soundCar; engine }
@@ -187,24 +210,35 @@ if ($interactive) {
     $s = Pick $fh2Cars '  Sound donor' $d
     Write-Host '  Autoshow group: where the car is listed (also picks its wheel''s shop category). Enter keeps the data donor''s.'
     $g = Pick-Group (Group-Of $d[1])
-    $plan += @{ id = $c[0]; car = $c[1]; donor = $d[1]; soundCar = $s[1]; engine = (Engine-Of $s[1]); group = $g.Id; groupName = $g.Name }
+    Write-Host '  Light donor: an FH2 car with similar lamps whose night lights to fit (pop-ups for a pop-up car); "none" to skip.'
+    $ls = if ((Light-Info $d[1]).Has) { $d } else { $fh2Cars | Where-Object { $_[3] -eq $c[3] -and (Light-Info $_[1]).Has } | Sort-Object { [math]::Abs([int]$_[2] - [int]$c[2]) } | Select-Object -First 1 }
+    $l = Pick $fh2Cars '  Light donor' $ls -AllowNone
+    while ($l -ne 'none' -and -not (Light-Info $l[1]).Has) { Write-Host "  $($l[1]) has no light data; pick another." -ForegroundColor Yellow; $l = Pick $fh2Cars '  Light donor' $ls -AllowNone }
+    $white = $false
+    if ($l -ne 'none' -and (Light-Info $l[1]).Warm) { $white = (Ask "  $($l[1])'s headlights are a warm, orange-ish halogen. Use whiter ones? [Y/n]") -notmatch '^(n|no)$' }
+    $plan += @{ id = $c[0]; car = $c[1]; donor = $d[1]; soundCar = $s[1]; engine = (Engine-Of $s[1]); group = $g.Id; groupName = $g.Name
+                lightDonor = $(if ($l -ne 'none') { $l[1] }); whiter = $white }
   }
   if (-not $plan.Count) { Write-Host 'Nothing to import.'; return }
   Write-Host "`nImport plan:" -ForegroundColor Cyan
-  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3}), group {4}" -f $_.car, $_.donor, $_.soundCar, $_.engine, $_.groupName) }
+  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3}), group {4}, lights {5}" -f $_.car, $_.donor, $_.soundCar, $_.engine, $_.groupName,
+    $(if ($_.lightDonor) { $_.lightDonor + $(if ($_.whiter) { ' (whiter headlights)' }) } else { 'none' })) }
   if ((Ask "`nProceed? [Y/n]") -match '^(n|no)$') { Write-Host 'Cancelled.'; return }
 } else {
   if ($Donor -and $Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
   if ($SoundCar -and $SoundCar.Count -ne $Car.Count) { throw '-SoundCar needs one entry per -Car (use "" for the data donor''s)' }
   if ($EngineSound -and $EngineSound.Count -ne $Car.Count) { throw '-EngineSound needs one entry per -Car (use "" for the data donor''s)' }
   if ($Group -and $Group.Count -ne $Car.Count) { throw '-Group needs one entry per -Car (use "" for the data donor''s)' }
+  if ($LightDonor -and $LightDonor.Count -ne $Car.Count) { throw '-LightDonor needs one entry per -Car (use "" for none)' }
+  foreach ($ld in @($LightDonor | Where-Object { $_ })) { if (-not (Light-Info $ld).Has) { throw "Light donor $ld has no light data (or isn't an FH2 car)" } }
   for ($i = 0; $i -lt $Car.Count; $i++) {
     $row = @($fm5Only | Where-Object { $_[1] -ieq $Car[$i] -or $_[0] -eq $Car[$i] })
     if (-not $row) { throw "FM5 car $($Car[$i]) not found, or FH2 already has it (see -ListFm5Only)" }
     $e = if ($EngineSound -and $EngineSound[$i]) { $EngineSound[$i] } elseif ($SoundCar -and $SoundCar[$i]) { Engine-Of $SoundCar[$i] } else { $null }
     $g = if ($Group -and $Group[$i]) { Find-Group $Group[$i] } else { $null }
     $plan += @{ id = $row[0][0]; car = $row[0][1]; donor = $(if ($Donor) { $Donor[$i] } else { '' }); soundCar = $(if ($SoundCar) { $SoundCar[$i] } else { '' }); engine = $e
-                group = $(if ($g) { $g.Id }); groupName = $(if ($g) { $g.Name }) }
+                group = $(if ($g) { $g.Id }); groupName = $(if ($g) { $g.Name })
+                lightDonor = $(if ($LightDonor -and $LightDonor[$i]) { $LightDonor[$i] }); whiter = [bool]$WhiterHeadlights }
   }
 }
 if (-not $AzimuthRoot -and -not $NoInstall) { throw 'Pass -AzimuthRoot <folder containing azimuth.exe>' }
@@ -240,6 +274,15 @@ $installed = @(& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -Azimuth
 $installed | ForEach-Object { Write-Host "$_" }
 $backup = ($installed | Where-Object { "$_" -like 'Backup: *' } | Select-Object -First 1) -replace '^Backup: '
 # remember what this layer imported (for later runs and for undoing it)
-ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine; group = $_.groupName } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
+ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine; group = $_.groupName; lightDonor = $_.lightDonor } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
+
+# night lights: fitted to the installed (converted) car models, so they go on as their own layer after the cars
+$lit = @($plan | Where-Object { $_.lightDonor })
+if ($lit.Count) {
+  Write-Host "`nFitting night lights..."
+  $la = @{ Car = @($lit | ForEach-Object car); Donor = @($lit | ForEach-Object lightDonor); GameRoot = $GameRoot; AzimuthRoot = $AzimuthRoot; Sqlite = $Sqlite; Name = "$Name-lights"
+           PresetFrom = @($lit | ForEach-Object { if ($_.whiter -and (Light-Info $_.lightDonor).Warm) { $whiterFrom } else { '' } }) }
+  & (Join-Path $tools 'Add-CarLights.ps1') @la 6>&1 3>&1 | Where-Object { "$_" -match '(<- lights of|lights placed|^Installed|^Backup|preset PG_Function_Headlight)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
+}
 Write-Host "`nDone. Start the game through azimuth.exe; the cars are in the Autoshow."
-Write-Host "Each import is undone separately, newest first, with the Uninstall.ps1 in its backup folder."
+Write-Host "Each import (and its lights) is undone separately, newest first, with the Uninstall.ps1 in its backup folder."
