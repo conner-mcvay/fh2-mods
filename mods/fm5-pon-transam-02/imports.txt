@@ -1,5 +1,0 @@
-# <FH2 media path> <- <FM5 media path> (source: -Fm5Media / FH2_FM5_MEDIA); a .zip segment means an entry inside that zip
-cars\PON_TransAm_02.zip <- cars\PON_TransAm_02.zip
-audio\cars\PON_TransAm_02.xml <- audio\cars\PON_TransAm_02.xml
-stripped\RC0.zip\Thumbnail_1065_Big.swatchbin <- ui\textures\data_bound\Feb14Update.zip\Thumbnail_1065_Big.swatchbin
-stripped\RC0.zip\Thumbnail_1065_Small.swatchbin <- ui\textures\data_bound\Feb14Update.zip\Thumbnail_1065_Small.swatchbin

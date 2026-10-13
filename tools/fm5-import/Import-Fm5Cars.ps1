@@ -17,12 +17,12 @@
   sqlite3.exe is downloaded from sqlite.org (hash-checked) if it isn't on PATH.
 
 .EXAMPLE
-  .\tools\Import-Fm5Cars.ps1
+  .\tools\fm5-import\Import-Fm5Cars.ps1
 .EXAMPLE
-  .\tools\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" `
+  .\tools\fm5-import\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" `
       -AzimuthRoot "D:\azimuth" -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,""
 .EXAMPLE
-  .\tools\Import-Fm5Cars.ps1 -ListFm5Only    # FM5 cars FH2 doesn't have
+  .\tools\fm5-import\Import-Fm5Cars.ps1 -ListFm5Only    # FM5 cars FH2 doesn't have
 #>
 [CmdletBinding()]
 param(
@@ -39,7 +39,7 @@ param(
   [switch]$NoInstall                         # build only (output in build\<Name>)
 )
 $ErrorActionPreference = 'Stop'
-$tools = $PSScriptRoot; $root = Split-Path $tools
+$tools = $PSScriptRoot; $root = Split-Path (Split-Path $tools); $bin = Join-Path (Split-Path $tools) 'bin'   # tools\fm5-import; downloads in tools\bin
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
 $interactive = -not $Car -and -not $ListFm5Only
 
@@ -77,18 +77,18 @@ $fm5Media = Join-Path $Fm5Root 'Mount\media'
 
 # --- sqlite3: PATH, -Sqlite, tools\bin, or download the official build ---
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
-if (-not $Sqlite -and (Test-Path "$tools\bin\sqlite3.exe")) { $Sqlite = "$tools\bin\sqlite3.exe" }
+if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
 if (-not $Sqlite) {
   $url = 'https://www.sqlite.org/2024/sqlite-tools-win-x64-3470200.zip'; $zipSha = '8c7fffbf4eec1f43e63153cca6deb018e4360d4d6b0d99bbdd2a541c53b7fa1c'
   Write-Host "Downloading sqlite3 from $url"
-  New-Item -ItemType Directory "$tools\bin" -Force | Out-Null
+  New-Item -ItemType Directory "$bin" -Force | Out-Null
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-  Invoke-WebRequest -Uri $url -OutFile "$tools\bin\sqlite-tools.zip" -UseBasicParsing
-  if ((Sha "$tools\bin\sqlite-tools.zip") -ne $zipSha) { Remove-Item "$tools\bin\sqlite-tools.zip"; throw 'sqlite download failed its hash check' }
+  Invoke-WebRequest -Uri $url -OutFile "$bin\sqlite-tools.zip" -UseBasicParsing
+  if ((Sha "$bin\sqlite-tools.zip") -ne $zipSha) { Remove-Item "$bin\sqlite-tools.zip"; throw 'sqlite download failed its hash check' }
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  $z = [IO.Compression.ZipFile]::OpenRead("$tools\bin\sqlite-tools.zip")
-  try { [IO.Compression.ZipFileExtensions]::ExtractToFile(($z.Entries | Where-Object Name -eq 'sqlite3.exe'), "$tools\bin\sqlite3.exe", $true) } finally { $z.Dispose() }
-  Remove-Item "$tools\bin\sqlite-tools.zip"; $Sqlite = "$tools\bin\sqlite3.exe"
+  $z = [IO.Compression.ZipFile]::OpenRead("$bin\sqlite-tools.zip")
+  try { [IO.Compression.ZipFileExtensions]::ExtractToFile(($z.Entries | Where-Object Name -eq 'sqlite3.exe'), "$bin\sqlite3.exe", $true) } finally { $z.Dispose() }
+  Remove-Item "$bin\sqlite-tools.zip"; $Sqlite = "$bin\sqlite3.exe"
 }
 
 # --- car lists. Every run adds a layer on top of the installed game (earlier imports and other mods stay) ---
@@ -191,7 +191,7 @@ try {
     $mods += $mod
   }
   Write-Host "`nBuilding (converting models for FH2 takes a minute per car)..."
-  & (Join-Path $tools 'Build-Mod.ps1') -Mod $mods -Name $Name -Game $GameRoot -Layer -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
+  & (Join-Path $tools '..\build\Build-Mod.ps1') -Mod $mods -Name $Name -Game $GameRoot -Layer -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
     Where-Object { "$_" -match '^(MODELS|Built)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
 } finally { Remove-Item Env:FH2_MODS_ROOT }
 

@@ -4,15 +4,15 @@
 
 .DESCRIPTION
   Import-Fm5Cars does this for every car it imports. This is for cars imported before that (or by hand): it finds
-  the imported cars in the game (FM5 cars stock FH2 doesn't have, per tools\stock-cars.txt) whose wheel isn't in the shop
+  the imported cars in the game (FM5 cars stock FH2 doesn't have, per tools\build\stock-cars.txt) whose wheel isn't in the shop
   yet, makes a wheel zip for each from FM5's car zip (converted for FH2's shaders), names, prices and files it like
   mods\stock-wheel-swap, and installs it as one more layer (undo with the Uninstall.ps1 in its backup folder).
   Folders default to the ones Import-Fm5Cars remembered.
 
 .EXAMPLE
-  .\tools\Add-ImportedCarWheels.ps1
+  .\tools\fm5-import\Add-ImportedCarWheels.ps1
 .EXAMPLE
-  .\tools\Add-ImportedCarWheels.ps1 -Car CHE_CorvetteZ06_02 -NoInstall
+  .\tools\fm5-import\Add-ImportedCarWheels.ps1 -Car CHE_CorvetteZ06_02 -NoInstall
 #>
 [CmdletBinding()]
 param(
@@ -23,7 +23,7 @@ param(
   [switch]$NoInstall
 )
 $ErrorActionPreference = 'Stop'
-$tools = $PSScriptRoot; $root = Split-Path $tools
+$tools = $PSScriptRoot; $root = Split-Path (Split-Path $tools); $bin = Join-Path (Split-Path $tools) 'bin'   # tools\fm5-import
 . (Join-Path $tools 'WheelSwap.ps1')
 $settingsPath = Join-Path $env:LOCALAPPDATA 'fh2-mods\import-fm5-cars.json'
 $saved = if (Test-Path $settingsPath) { Get-Content $settingsPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
@@ -31,7 +31,7 @@ if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $A
 foreach ($p in 'GameRoot', 'Fm5Root') { if (-not (Get-Variable $p -ValueOnly)) { throw "Pass -$p (or run Import-Fm5Cars once so it's remembered)" } }
 if (-not $NoInstall -and -not $AzimuthRoot) { throw 'Pass -AzimuthRoot' }
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
-if (-not $Sqlite -and (Test-Path "$tools\bin\sqlite3.exe")) { $Sqlite = "$tools\bin\sqlite3.exe" }
+if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
 if (-not $Sqlite) { throw 'Need sqlite3.exe: pass -Sqlite, put it on PATH, or run Import-Fm5Cars once (it downloads one)' }
 $fm5Media = Join-Path $Fm5Root 'Mount\media'
 $fhDb = (Join-Path $GameRoot 'Mount\media\stripped\gamedbRC.slt').Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
@@ -41,8 +41,8 @@ function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sq
   , @($out | ForEach-Object { , ($_.TrimEnd("`r").Split('|')) })
 }
 
-# imported cars (FM5 has them, stock FH2 doesn't: tools\stock-cars.txt) whose stock wheel isn't in the shop
-$stock = @{}; Get-Content (Join-Path $tools 'stock-cars.txt') | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $stock[$_.ToLower()] = 1 }
+# imported cars (FM5 has them, stock FH2 doesn't: tools\build\stock-cars.txt) whose stock wheel isn't in the shop
+$stock = @{}; Get-Content (Join-Path $tools '..\build\stock-cars.txt') | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $stock[$_.ToLower()] = 1 }
 $rows = Q "SELECT c.Id, c.MediaName, c.Year, w.MediaName, f.DisplayName FROM fh.Data_Car c JOIN fh.List_Wheels w ON w.ID = c.StockWheelID JOIN fm.Data_Car f ON f.MediaName = c.MediaName COLLATE NOCASE WHERE w.IsStock = 1 ORDER BY c.MediaName"
 $cars = @($rows | Where-Object {
   if ($Car) { $Car -contains $_[1] } else { -not $stock.ContainsKey($_[1].ToLower()) -and (Test-Path (Join-Path $GameRoot "Mount\media\cars\$($_[1]).zip")) }
@@ -71,7 +71,7 @@ Set-Content (Join-Path $modDir 'index-donors.txt') $donors -Encoding ASCII
 
 $env:FH2_MODS_ROOT = $ws
 try {
-  & (Join-Path $tools 'Build-Mod.ps1') -Mod 'imported-car-wheels' -Name $Name -Game $GameRoot -Layer -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
+  & (Join-Path $tools '..\build\Build-Mod.ps1') -Mod 'imported-car-wheels' -Name $Name -Game $GameRoot -Layer -Fm5Media $fm5Media -Sqlite $Sqlite 6>&1 3>&1 |
     Where-Object { "$_" -match '^(MODELS|Built)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
 } finally { Remove-Item Env:FH2_MODS_ROOT }
 $release = Join-Path $root "build\$Name"

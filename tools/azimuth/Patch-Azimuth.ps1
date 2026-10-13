@@ -12,7 +12,7 @@
   (e.g. by an earlier mod): it's identified by its SHA-256 with those two spots blanked. Other builds are refused.
 
 .EXAMPLE
-  .\tools\Patch-Azimuth.ps1 -Azimuth G:\FH2-1\azimuth\azimuth.exe -Index G:\FH2-1\game\Mount\hash.manifest -Out G:\FH2-1\azimuth\azimuth.exe
+  .\tools\azimuth\Patch-Azimuth.ps1 -Azimuth G:\FH2-1\azimuth\azimuth.exe -Index G:\FH2-1\game\Mount\hash.manifest -Out G:\FH2-1\azimuth\azimuth.exe
 #>
 param(
   [Parameter(Mandatory)][string]$Azimuth,   # Azimuth 0.9.7 launcher, stock or already patched

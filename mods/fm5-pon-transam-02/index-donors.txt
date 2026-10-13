@@ -1,3 +1,0 @@
-# <new media path> <- <stock media path whose hash.manifest metadata it copies>
-cars\PON_TransAm_02.zip <- cars\PON_TransAmGTA_87.zip
-audio\cars\PON_TransAm_02.xml <- audio\fmodanthem\durango\PG_PON_TransAmGTA_87.bank

@@ -9,7 +9,7 @@
     mods\<name>\media\<path>\<file>                        anything else: loose file copied as-is
 
   Stock zips, databases and zipmanifest.xml are read from the game package (.zip of the Anthem_* folder) or from a
-  game folder whose files are verified against tools\stock-hashes.json, so a build never starts from a modded file.
+  game folder whose files are verified against tools\build\stock-hashes.json, so a build never starts from a modded file.
   -Layer -Game <folder> instead builds on top of what's installed there (e.g. earlier car imports), so mods stack.
   Mods are applied in the order given, so several mods can patch the same zip or database; later mods win on conflicts.
 
@@ -17,9 +17,9 @@
   (each mod's README, {{MANIFEST_VALUES}} filled in) and tools\Repack-ForzaZip.ps1 (if any zip changed).
 
 .EXAMPLE
-  .\tools\Build-Mod.ps1 -Mod cockpit-fov -Package G:\FH2-1\Anthem_1.0.0.64_x64__8wekyb3d8bbwe.zip
+  .\tools\build\Build-Mod.ps1 -Mod cockpit-fov -Package G:\FH2-1\Anthem_1.0.0.64_x64__8wekyb3d8bbwe.zip
 .EXAMPLE
-  .\tools\Build-Mod.ps1 -Mod cockpit-fov,dlc-unlock -Name my-setup
+  .\tools\build\Build-Mod.ps1 -Mod cockpit-fov,dlc-unlock -Name my-setup
 #>
 param(
   [Parameter(Mandatory)][string[]]$Mod,
@@ -37,7 +37,7 @@ Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 if (-not $Name) { if ($Mod.Count -eq 1) { $Name = $Mod[0] } else { throw 'Pass -Name when building several mods together' } }
 if ($Game) { Open-StockSource -Game $Game -Layer:$Layer } else { Open-StockSource -Package $Package }
 
-$root = Split-Path $PSScriptRoot
+$root = Split-Path (Split-Path $PSScriptRoot)   # tools\build -> repo root
 $modsRoot = if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }   # generated mods can live outside the repo
 $build = Join-Path $root "build\$Name"
 $dist = Join-Path $root 'dist'
@@ -193,7 +193,7 @@ try {
 # light lenses, decals and badges aren't drawn
 if ($fm5CarZips.Count) {
   if (-not ('Fm5ModelConverter' -as [type])) {
-    Add-Type -Path (Join-Path $PSScriptRoot 'ForzaModel.cs'), (Join-Path $PSScriptRoot 'Fm5ModelConverter.cs') -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
+    Add-Type -Path (Join-Path $PSScriptRoot '..\fm5-import\ForzaModel.cs'), (Join-Path $PSScriptRoot '..\fm5-import\Fm5ModelConverter.cs') -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
   }
   foreach ($rel in $fm5CarZips) {
     $src = $zips[$rel]; $carName = [IO.Path]::GetFileNameWithoutExtension($rel)
@@ -272,7 +272,7 @@ if ($new.Count) {
   }
   [IO.File]::WriteAllBytes("$build\hash.manifest", $out.ToArray())
   New-Item -ItemType Directory "$build\tools" -Force | Out-Null
-  Copy-Item (Join-Path $PSScriptRoot 'Patch-Azimuth.ps1') "$build\tools\"
+  Copy-Item (Join-Path $PSScriptRoot '..\azimuth\Patch-Azimuth.ps1') "$build\tools\"
   $sha = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($out.ToArray()) | ForEach-Object { $_.ToString('x2') })
   Write-Host "Wrote hash.manifest ($($out.Length) bytes, SHA-256 $sha); azimuth.exe must be patched to match (tools\Patch-Azimuth.ps1)"
 }
@@ -296,8 +296,8 @@ $version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw |
   azimuth_version = '0.9.7'; azimuth_stock_sha256 = '5d3ce30b440dab2604fe42ff7cd129394f0b98418e22b2a44270f548199bc6a9'
   files = @($files)
 } | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
-Copy-Item (Join-Path $PSScriptRoot 'release\Install.ps1'), (Join-Path $PSScriptRoot 'release\Uninstall.ps1') $build
-if (Test-Path "$build\hash.manifest") { New-Item -ItemType Directory "$build\tools" -Force | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'Patch-Azimuth.ps1') "$build\tools\" -Force }
+Copy-Item (Join-Path $PSScriptRoot '..\release\Install.ps1'), (Join-Path $PSScriptRoot '..\release\Uninstall.ps1') $build
+if (Test-Path "$build\hash.manifest") { New-Item -ItemType Directory "$build\tools" -Force | Out-Null; Copy-Item (Join-Path $PSScriptRoot '..\azimuth\Patch-Azimuth.ps1') "$build\tools\" -Force }
 $installText = @"
 
 

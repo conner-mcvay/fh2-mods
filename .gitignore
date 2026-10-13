@@ -1,5 +1,6 @@
-build/
-dist/
+/build/
+/dist/
 *.orig
 *.bak
 tools/bin/
+tools/weather-menu/*.exe
