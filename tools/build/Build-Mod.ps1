@@ -147,11 +147,24 @@ try {
       }
     }
 
-    # zip overlays
+    # zip overlays. <entry>.set files patch an existing ini entry key by key ("key value" lines) instead of replacing
+    # it, so several mods can change different keys of one file (e.g. CameraSettings.ini)
     foreach ($zd in Get-ChildItem -Recurse -Directory $modMedia | Where-Object { $_.Name -like '*.zip' }) {
       $rel = $zd.FullName.Substring($modMedia.Length + 1)
       Use-Zip $rel
-      Copy-Item -Recurse -Force "$($zd.FullName)\*" $zips[$rel]
+      Copy-Item -Recurse -Force "$($zd.FullName)\*" $zips[$rel] -Exclude '*.set'
+      foreach ($set in Get-ChildItem -Recurse -File $zd.FullName -Filter *.set) {
+        $entry = Join-Path $zips[$rel] ($set.FullName.Substring($zd.FullName.Length + 1) -replace '\.set$', '')
+        if (-not (Test-Path $entry)) { throw "$m\$($set.Name): $rel has no entry to patch" }
+        $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($entry))
+        foreach ($kv in Get-Content $set.FullName | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) {
+          $key, $val = $kv.Trim() -split '\s+', 2
+          $i = -1; for ($j = 0; $j -lt $lines.Count; $j++) { if (($lines[$j].Trim() -split '\s+', 2)[0] -ieq $key) { $i = $j; break } }
+          if ($i -ge 0) { $lines[$i] = "$key $val" } else { $lines.Add("$key $val") }
+          Write-Host "SET      $m\$rel\$($set.Name -replace '\.set$', ''): $key $val"
+        }
+        [IO.File]::WriteAllLines($entry, $lines)
+      }
     }
 
     # SQL patches

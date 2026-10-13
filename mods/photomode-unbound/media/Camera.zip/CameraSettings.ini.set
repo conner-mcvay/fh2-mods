@@ -1,0 +1,9 @@
+# Photo mode as a free camera: no height limit, no 100 m leash, no ceiling/floor, no collision with the car or world
+PhotoModeCam\MaxHeight 1000
+PhotoModeCam\BoundaryCylinderRadius 100000
+PhotoModeCam\BoundaryCeilingHeight 5000
+PhotoModeCam\BoundaryFloorDepth 5000
+PhotoModeCam\CollisionFixIterations 0
+PhotoModeCam\CollisionSphereRadius 0.01
+PhotoModeCam\CarBoundingBoxHorizontalExpansion 0
+PhotoModeCam\CarBoundingBoxVerticalExpansion 0

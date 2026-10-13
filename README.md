@@ -7,6 +7,7 @@ Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.
 | [cockpit-fov](mods/cockpit-fov) | Cockpit/driver camera FOV 48 → 70 |
 | [dlc-unlock](mods/dlc-unlock) | DLC and bonus cars can be bought in the Autoshow without the Xbox Live license check |
 | [stock-wheel-swap](mods/stock-wheel-swap) | Every car's stock wheels can be fitted to any car, listed under the car's brand |
+| [photomode-unbound](mods/photomode-unbound) | Photo mode without its height cap, 100 m leash, ceiling/floor and collision, as a free camera |
 
 | Tool | Description |
 |---|---|
@@ -20,6 +21,7 @@ mods/<name>/
   README.txt                              shipped in the release zip ({{MANIFEST_VALUES}} is filled in by the build)
   media/...                               changes only, mirroring the game's media folder:
     <Archive>.zip/<entry>                   a folder named like a zip holds replacement/new entries for that zip
+    <Archive>.zip/<entry>.set               "key value" lines patched into that ini entry (other keys untouched)
     stripped/gamedbRC.slt/<patch>.sql       a folder named like a .slt holds SQL patches, applied in name order
     <path>/<file>                           anything else is a loose file, copied as-is
   imports.txt                             files to copy in: "<FH2 media path> <- <FM5 media path>", or "<- fh2:<path>" to take one from the base game (a .zip segment = entry inside it; missing zips are created)
