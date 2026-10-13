@@ -1,30 +1,27 @@
-FORZA HORIZON 2 (PC) - FM5 CAR IMPORT: PON_TransAm_02
-=====================================================
+FORZA HORIZON 2 (PC) - FM5 CAR IMPORT: 2002 PONTIAC FIREBIRD TRANS AM
+====================================================================
 
-Adds the Forza Motorsport 5 PON_TransAm_02 (car Id 1065) to Forza Horizon 2.
+Adds the Forza Motorsport 5 2002 Pontiac Firebird Trans Am (car Id 1065) to
+Forza Horizon 2 as a new car in the Autoshow (Pontiac).
 
-Built for game version 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe).
+Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth 0.9.7.
 
+What's included:
+  - The FM5 car, converted for FH2's shaders (glass, light lenses, badges and
+    decals render)
+  - Its stock and race-engine upgrades, drivetrain, body and tuning data
+  - FM5 thumbnail
+  - Engine sound borrowed from FH2's 1995 Corvette ZR-1 (5.7L V8)
 
-CONTENTS
---------
-  media\cars\PON_TransAm_02.zip          The car (from FM5), plus its FM5 engine sound and thumbnail
-  media\stripped\gamedbRC.slt    Game database with the car's rows added
-  media\zipmanifest.xml          Manifest with an entry for the new car zip
+Known limitations:
+  - The car's name shows blank in menus
+  - Night lighting (headlights/taillights at night) not yet checked
+  - No windshield wiper sweep in rain
 
+This mod adds new files to the game, so it also replaces Mount\hash.manifest
+(Azimuth's file index) and patches azimuth.exe to accept it. The installer
+below does both and keeps your stock launcher.
 
-INSTALL
--------
-1. Open your game's "media" folder:
-     ...\Anthem_1.0.0.64_x64__8wekyb3d8bbwe\Mount\media
-2. BACK UP zipmanifest.xml and stripped\gamedbRC.slt.
-3. Copy this mod's "media" folder over the game's and overwrite.
-4. Start the game.
-
-To uninstall, restore the two backed-up files and delete cars\PON_TransAm_02.zip.
-
-Other mods that change zipmanifest.xml or gamedbRC.slt will overwrite this one
-(and vice versa). To combine them, build them together from the fh2-mods repo.
-Manifest values for merging by hand:
-
-{{MANIFEST_VALUES}}
+It replaces zipmanifest.xml, gamedbRC.slt, stripped\RC0.zip and
+hash.manifest, so it can't be installed on top of other mods that change
+those files. Build the mods together from the fh2-mods repo instead.

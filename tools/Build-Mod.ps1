@@ -88,6 +88,7 @@ function Use-Zip([string]$rel) {
   [IO.Compression.ZipFile]::ExtractToDirectory($stockZip, $zips[$rel])
 }
 $readmes = @()
+$fm5CarZips = @()   # FM5 car zips whose models get converted for FH2's shaders
 $indexDonors = @{}   # new media path (lower) -> stock media path whose index metadata it reuses (from index-donors.txt)
 try {
   foreach ($m in $Mod) {
@@ -121,6 +122,7 @@ try {
         } elseif ($dest -like '*.zip') {
           $imports[$dest] = $tmp
           Use-Zip $dest
+          if ($dest -like 'cars\*.zip' -and $fm5CarZips -notcontains $dest) { $fm5CarZips += $dest }
         } else {
           $target = Join-Path "$build\media" $dest
           New-Item -ItemType Directory (Split-Path $target) -Force | Out-Null
@@ -162,11 +164,47 @@ try {
     }
   }
   if ($zips.Count) { Get-Stock 'zipmanifest.xml' "$build\media\zipmanifest.xml" }
+  if ($fm5CarZips.Count) {
+    # the converter reads FH2's material and shader libraries to learn what each mesh's shader needs
+    foreach ($lib in 'cars\_library\Materials.zip', '_library\Shaders.zip') { Get-Stock $lib (Join-Path $work "stock\$lib") }
+  }
   $stockFiles = @{}
   foreach ($e in $pkg.Entries) { if ($e.FullName -match '/Mount/media/(.+)$' -and $e.Name) { $stockFiles[$Matches[1].Replace('/', '\').ToLower()] = 1 } }
   $ie = $pkg.Entries | Where-Object { $_.FullName -like '*/Mount/hash.manifest' } | Select-Object -First 1
   $ms = New-Object IO.MemoryStream; $s = $ie.Open(); $s.CopyTo($ms); $s.Close(); $stockIndex = $ms.ToArray()
 } finally { $pkg.Dispose() }
+
+# FM5 car models: add the vertex inputs FH2's shaders read (tangents, extra UV sets); without them glass,
+# light lenses, decals and badges aren't drawn
+if ($fm5CarZips.Count) {
+  if (-not ('Fm5ModelConverter' -as [type])) {
+    Add-Type -Path (Join-Path $PSScriptRoot 'ForzaModel.cs'), (Join-Path $PSScriptRoot 'Fm5ModelConverter.cs') -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
+  }
+  foreach ($rel in $fm5CarZips) {
+    $src = $zips[$rel]; $carName = [IO.Path]::GetFileNameWithoutExtension($rel)
+    $files = New-Object 'System.Collections.Generic.Dictionary[string,byte[]]'
+    Get-ChildItem -Recurse -File $src | ForEach-Object { $files[$_.FullName.Substring($src.Length + 1).Replace('\', '/')] = [IO.File]::ReadAllBytes($_.FullName) }
+    $resolver = New-Object Fh2ShaderResolver((Join-Path $work 'stock'), $files, $carName)
+    try {
+      $inputs = [Func[string, System.Collections.Generic.HashSet[string]]] { param($p) $resolver.Inputs($p) }
+      $replacement = [Func[string, string]] { param($p) $resolver.LibraryReplacement($p) }
+      $converted = 0
+      foreach ($k in @($files.Keys | Where-Object { $_ -like '*.modelbin' })) {
+        $log = New-Object 'System.Collections.Generic.List[string]'
+        try { $out = [Fm5ModelConverter]::Convert($files[$k], $inputs, $replacement, $log) }
+        catch { throw "Converting $carName\$k failed: $($_.Exception.InnerException.Message)" }
+        if (-not $out) { continue }
+        $problems = [ForzaModelCheck]::Check($out)
+        if ($problems.Count) { throw "Converted $k fails validation: $($problems -join '; ')" }
+        [IO.File]::WriteAllBytes((Join-Path $src $k.Replace('/', '\')), $out)
+        Write-Host "MODEL    $carName\$k"; $log | ForEach-Object { Write-Host "         $_" }
+        $converted++
+      }
+      Write-Host "MODELS   $carName`: $converted converted"
+      $resolver.Log | Select-Object -Unique | ForEach-Object { Write-Warning "$carName`: $_" }
+    } finally { $resolver.Dispose() }
+  }
+}
 
 # repack each touched zip once, after every mod's overlay is in place
 foreach ($rel in $zips.Keys) {
@@ -222,6 +260,48 @@ if ($new.Count) {
   $sha = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($out.ToArray()) | ForEach-Object { $_.ToString('x2') })
   Write-Host "Wrote hash.manifest ($($out.Length) bytes, SHA-256 $sha); azimuth.exe must be patched to match (tools\Patch-Azimuth.ps1)"
 }
+
+# install.json + Install.ps1/Uninstall.ps1: every payload file with its hash and the hash of the stock file it replaces
+function Get-Sha([byte[]]$b) { -join ([Security.Cryptography.SHA256]::Create().ComputeHash($b) | ForEach-Object { $_.ToString('x2') }) }
+$payload = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring($build.Length + 1) })
+if (Test-Path "$build\hash.manifest") { $payload += 'hash.manifest' }
+$pkg = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Package).Path)
+try {
+  function Get-StockSha([string]$mountRel) {
+    $suffix = '/Mount/' + $mountRel.Replace('\', '/')
+    $e = $pkg.Entries | Where-Object { $_.FullName.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+    if (-not $e) { return $null }
+    $s = $e.Open(); try { (-join ([Security.Cryptography.SHA256]::Create().ComputeHash($s) | ForEach-Object { $_.ToString('x2') })) } finally { $s.Close() }
+  }
+  $files = foreach ($p in $payload) {
+    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); stock_sha256 = Get-StockSha $p }
+  }
+  $gameSha = Get-StockSha 'forza_durango_release_final.exe'
+} finally { $pkg.Dispose() }
+$version = if ((Split-Path $Package -Leaf) -match '_(\d+\.\d+\.\d+\.\d+)_') { $Matches[1] } else { 'unknown' }
+[ordered]@{
+  name = $Name; mods = $Mod; game_version = $version; game_exe_sha256 = $gameSha
+  azimuth_version = '0.9.7'; azimuth_stock_sha256 = '5d3ce30b440dab2604fe42ff7cd129394f0b98418e22b2a44270f548199bc6a9'
+  files = @($files)
+} | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
+Copy-Item (Join-Path $PSScriptRoot 'release\Install.ps1'), (Join-Path $PSScriptRoot 'release\Uninstall.ps1') $build
+if (Test-Path "$build\hash.manifest") { New-Item -ItemType Directory "$build\tools" -Force | Out-Null; Copy-Item (Join-Path $PSScriptRoot 'Patch-Azimuth.ps1') "$build\tools\" -Force }
+$installText = @"
+
+
+INSTALL (automatic)
+-------------------
+Close Azimuth, then in PowerShell from this folder:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "<folder containing Mount>" -AzimuthRoot "<folder containing azimuth.exe>"
+
+It checks your game and Azimuth versions, refuses to overwrite files another mod changed (unless you add -Force),
+backs up everything it replaces$(if (Test-Path "$build\hash.manifest") { ', and patches azimuth.exe to accept this mod''s new files (your stock launcher is kept as azimuth.stock.exe)' }).
+It prints the backup folder. To undo:
+
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot "<printed backup folder>"
+"@
+Add-Content "$build\README.txt" $installText
 
 $out = Join-Path $dist "$Name.zip"
 if (Test-Path $out) { Remove-Item $out }

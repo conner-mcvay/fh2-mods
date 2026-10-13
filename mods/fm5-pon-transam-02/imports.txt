@@ -3,5 +3,3 @@ cars\PON_TransAm_02.zip <- cars\PON_TransAm_02.zip
 audio\cars\PON_TransAm_02.xml <- audio\cars\PON_TransAm_02.xml
 stripped\RC0.zip\Thumbnail_1065_Big.swatchbin <- ui\textures\data_bound\Feb14Update.zip\Thumbnail_1065_Big.swatchbin
 stripped\RC0.zip\Thumbnail_1065_Small.swatchbin <- ui\textures\data_bound\Feb14Update.zip\Thumbnail_1065_Small.swatchbin
-audio\fmodanthem\durango\PG_PON_TransAm_02.bank <- audio\fmod\durango\PON_TransAm_02.bank
-audio\fmodanthem\durango\PG_CHE_2_MonteCarloSS_11_EN.bank <- audio\fmod\durango\CHE_2_MonteCarloSS_11_EN.bank

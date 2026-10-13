@@ -293,3 +293,5 @@ UPDATE Data_Car SET
 WHERE Id = 1065;
 UPDATE Data_Car SET ContentId = 0, Thumbnail = 'game:\Media\Stripped\RC0\Thumbnail_1065.png' WHERE Id = 1065;
 INSERT INTO Data_Car_Buckets (CarId, CarBucket, BucketHero) VALUES (1065, 30, 0);   -- bucket of donor unless -Bucket given
+UPDATE Data_Engine SET MediaName = 'CHE_CorvetteZR1_95' WHERE EngineID = 512;   -- engine sound borrowed from FH2
+UPDATE Data_Engine SET MediaName = 'CHE_CorvetteZR1_95' WHERE EngineID = 2159;   -- engine sound borrowed from FH2

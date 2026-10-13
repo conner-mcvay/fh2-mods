@@ -26,7 +26,7 @@ param(
   [string]$Fm5Db,                           # default: <Fm5Media>\db\gamedb.slt
   [string]$Mod,
   [int]$DonorCarId,                 # FH2 car whose FH2-only Data_Car columns are copied; default: same make, nearest year
-  [string]$EngineSound,             # FH2 engine MediaName to use for engines whose PG_<name>.bank FH2 lacks
+  [string]$EngineSound,             # FH2 engine MediaName whose sound the car's new engines borrow (instead of FM5's banks)
   [string]$Thumbnail,               # Data_Car.Thumbnail override; default: the donor's thumbnail
   [int]$Bucket,                     # FH2 CarBuckets.Id (Autoshow class group); default: the donor's bucket
   [string]$Package = $env:FH2_PACKAGE,
@@ -215,13 +215,15 @@ foreach ($en in $engines) {
   $em = @(Q "SELECT MediaName FROM fm.Data_Engine WHERE EngineID = $en")[0]
   if (-not $em -or $banks.ContainsKey($em.ToLower())) { continue }
   if ((Q "SELECT 1 FROM fh.Data_Engine WHERE EngineID = $en")) { continue }   # existing FH2 engine: not ours to change
-  if (Test-Path (Join-Path $Fm5Media "audio\fmod\durango\$em.bank")) {
-    # FH2 loads PG_<engine>.bank; FM5's bank works unchanged under that name
+  if ($EngineSound) {
+    # borrowed FH2 sound wins: FM5 banks renamed PG_<engine>.bank turned out silent for the Trans Am
+    if (-not $banks.ContainsKey($EngineSound.ToLower())) { throw "FH2 has no PG_$EngineSound.bank to borrow" }
+    [void]$sb.AppendLine("UPDATE Data_Engine SET MediaName = '$EngineSound' WHERE EngineID = $en;   -- engine sound borrowed from FH2")
+    $report += "sound   engine $en ($em) -> FH2 $EngineSound"
+  } elseif (Test-Path (Join-Path $Fm5Media "audio\fmod\durango\$em.bank")) {
+    # FH2 loads PG_<engine>.bank; the GT500 import used FM5's bank under that name (not confirmed audible)
     $importLines += "audio\fmodanthem\durango\PG_$em.bank <- audio\fmod\durango\$em.bank"
     $report += "sound   engine $en ($em): FM5 bank imported as PG_$em.bank"
-  } elseif ($EngineSound) {
-    [void]$sb.AppendLine("UPDATE Data_Engine SET MediaName = '$EngineSound' WHERE EngineID = $en;   -- FH2 has no PG_$em.bank")
-    $report += "sound   engine $en ($em) -> $EngineSound"
   } else { $report += "SOUND   engine $en ($em): FH2 has no PG_$em.bank; pass -EngineSound to borrow one" }
 }
 
@@ -254,33 +256,21 @@ if (-not (Test-Path $readmePath)) {
 $title
 $('=' * $title.Length)
 
-Adds the Forza Motorsport 5 $media (car Id $CarId) to Forza Horizon 2.
+Adds the Forza Motorsport 5 $media (car Id $CarId) to Forza Horizon 2 as a new
+car in the Autoshow.
 
-Built for game version 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe).
+Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth 0.9.7.
 
+Known limitations:
+  - The car's name shows blank in menus
 
-CONTENTS
---------
-  media\cars\$media.zip          The car (from FM5), plus its FM5 engine sound and thumbnail
-  media\stripped\gamedbRC.slt    Game database with the car's rows added
-  media\zipmanifest.xml          Manifest with an entry for the new car zip
+This mod adds new files to the game, so it also replaces Mount\hash.manifest
+(Azimuth's file index) and patches azimuth.exe to accept it. The installer
+below does both and keeps your stock launcher.
 
-
-INSTALL
--------
-1. Open your game's "media" folder:
-     ...\Anthem_1.0.0.64_x64__8wekyb3d8bbwe\Mount\media
-2. BACK UP zipmanifest.xml and stripped\gamedbRC.slt.
-3. Copy this mod's "media" folder over the game's and overwrite.
-4. Start the game.
-
-To uninstall, restore the two backed-up files and delete cars\$media.zip.
-
-Other mods that change zipmanifest.xml or gamedbRC.slt will overwrite this one
-(and vice versa). To combine them, build them together from the fh2-mods repo.
-Manifest values for merging by hand:
-
-{{MANIFEST_VALUES}}
+It replaces zipmanifest.xml, gamedbRC.slt, stripped\RC0.zip and
+hash.manifest, so it can't be installed on top of other mods that change
+those files. Build the mods together from the fh2-mods repo instead.
 "@)
 }
 
