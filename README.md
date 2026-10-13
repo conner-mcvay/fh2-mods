@@ -64,15 +64,15 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
 
 ## Importing FM5 cars (end users)
 
-`tools\Import-Fm5Cars.ps1` imports any FM5 car from your own installs; this repo ships no game files. You need FH2 1.0.0.64 (stock files, or this tool's previous import) on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
+**Double-click `Import-Fm5Cars.cmd`** (or run `tools\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) and a **sound donor** (any FH2 car whose engine sound to use). On later runs it offers to keep the cars already imported. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 (stock files, or this tool's previous import) on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
 
 ```powershell
 # which FM5 cars FH2 doesn't have
 .\tools\Import-Fm5Cars.ps1 -ListFm5Only -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe"
 
-# import: one FH2 donor per car (FH2-only car data, Autoshow group, engine sound unless -EngineSound)
+# or non-interactive: one data donor per car; -SoundCar "" = the data donor's sound
 .\tools\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" -AzimuthRoot "D:\azimuth" `
-    -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -EngineSound CHE_CorvetteZR1_95,""
+    -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -SoundCar CHE_CorvetteZR1_95,""
 ```
 
 It verifies the game files it reads are stock (`tools\stock-hashes.json`, hashes only), generates each car's mod in a private workspace, builds one combined install (models converted for FH2's shaders), and installs it with backups. Running it again uninstalls the previous import first, so pass the full car list every time. Undo with the `Uninstall.ps1` kept in the printed backup folder. `-NoInstall` builds only.
