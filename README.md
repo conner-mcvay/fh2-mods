@@ -80,6 +80,8 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
 
 It checks the game version, generates each car's mod in a private workspace, builds one install on top of your current game files (models converted for FH2's shaders), and installs it with backups. Each run gets its own backup folder (`mod-backups\fm5-cars-<time>`, with the run's car list in `cars.json`); undo a run with the `Uninstall.ps1` kept there, newest run first. `-NoInstall` builds only.
 
+Each imported car's stock wheel is also put in the wheel shop for any car, like [stock-wheel-swap](mods/stock-wheel-swap) does for FH2's cars (its own wheel zip, converted from FM5, named from FM5's string table; `tools\WheelSwap.ps1`). `-NoWheelSwap` on `Export-Fm5Car.ps1` skips it. For cars imported before this, run `tools\Add-ImportedCarWheels.ps1`: it finds imported cars (FM5 cars not in `tools\stock-cars.txt`) whose wheel isn't in the shop and installs their wheels as one more layer.
+
 ## Importing FM5 cars (repo mods)
 
 ```powershell
