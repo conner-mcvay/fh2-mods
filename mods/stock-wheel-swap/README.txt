@@ -15,6 +15,10 @@ What it changes in gamedbRC.slt (List_Wheels, 344 stock wheels):
   - DisplayName -> year + the game's own name for the car, e.g. "1969 2000GT"
   - Price -> by weight, on the same scale as the aftermarket wheels
     (3,200 - 3,800 CR)
+  - WheelAnnotations: one row per wheel, so the wheel shop lists it. Category by
+    the Autoshow group of its car: Sport (sports cars, hot hatches, track toys,
+    rally), the forged category (supercars, GT cars, luxury SUVs) or
+    Specialized (classics, muscle, offroad)
 Each car still starts on its own stock wheels.
 
 Not changed: traffic and placeholder wheels, and 169 leftover wheel entries from
