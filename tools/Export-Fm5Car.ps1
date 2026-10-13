@@ -18,42 +18,46 @@
     media\stripped\gamedbRC.slt\<Id>-<Media>.sql
 
 .EXAMPLE
-  .\tools\Export-Fm5Car.ps1 -CarId 1065 -Fm5Media G:\FM5\Forza_1.0.0.20_x64__8wekyb3d8bbwe\Mount\media
+  .\tools\Export-Fm5Car.ps1 -Car PON_TransAm_02 -Donor PON_TransAmGTA_87 -Fm5Media G:\FM5\Forza_1.0.0.20_x64__8wekyb3d8bbwe\Mount\media
 #>
 param(
-  [Parameter(Mandatory)][int]$CarId,
+  [string]$Car,                     # FM5 car: MediaName (e.g. PON_TransAm_02) or Id
+  [int]$CarId,
   [string]$Fm5Media = $env:FH2_FM5_MEDIA,   # FM5 Mount\media folder (car zip, sound banks, thumbnails, db\gamedb.slt)
   [string]$Fm5Db,                           # default: <Fm5Media>\db\gamedb.slt
   [string]$Mod,
-  [int]$DonorCarId,                 # FH2 car whose FH2-only Data_Car columns are copied; default: same make, nearest year
-  [string]$EngineSound,             # FH2 engine MediaName whose sound the car's new engines borrow (instead of FM5's banks)
-  [string]$Thumbnail,               # Data_Car.Thumbnail override; default: the donor's thumbnail
+  [string]$Donor,                   # FH2 donor car: MediaName or Id. Supplies FH2-only Data_Car columns, Autoshow bucket,
+  [int]$DonorCarId,                 #   index metadata and (by default) the engine sound. Default: same make, nearest year
+  [string]$EngineSound,             # FH2 engine MediaName whose sound the car's new engines use; default: the donor's
+  [switch]$UseFm5Sound,             # try FM5's own engine banks (renamed PG_<engine>.bank) instead of an FH2 sound
+  [string]$Thumbnail,               # Data_Car.Thumbnail override; default: the FM5 thumbnail, else the donor's
   [int]$Bucket,                     # FH2 CarBuckets.Id (Autoshow class group); default: the donor's bucket
-  [string]$Package = $env:FH2_PACKAGE,
+  [string]$Package = $env:FH2_PACKAGE,   # stock FH2 source: the game package zip...
+  [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
   [string]$Sqlite = $env:FH2_SQLITE
 )
 $ErrorActionPreference = 'Stop'
 if (-not $Fm5Media) { throw 'Pass -Fm5Media <FM5 Mount\media folder> or set FH2_FM5_MEDIA' }
 if (-not $Fm5Db) { $Fm5Db = Join-Path $Fm5Media 'db\gamedb.slt' }
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-if (-not $Package) { throw 'Pass -Package <path to Anthem_*.zip> or set FH2_PACKAGE' }
+. (Join-Path $PSScriptRoot 'StockSource.ps1')
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
 if (-not $Sqlite) { throw 'Need sqlite3.exe: pass -Sqlite, set FH2_SQLITE, or put it on PATH' }
 $root = Split-Path $PSScriptRoot
 
-# --- stock FH2 database + bank list from the package ---
+# --- stock FH2 database; sound banks / audio xml FH2 ships (from the stock file list, so earlier imports don't count) ---
 $tmp = Join-Path $root 'build\.export'
 New-Item -ItemType Directory $tmp -Force | Out-Null
 $fh2Db = Join-Path $tmp 'gamedbRC.slt'
-$pkg = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Package).Path)
+if ($Game) { Open-StockSource -Game $Game } else { Open-StockSource -Package $Package }
 try {
-  $e = $pkg.Entries | Where-Object { $_.FullName -like '*/Mount/media/stripped/gamedbRC.slt' } | Select-Object -First 1
-  [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $fh2Db, $true)
-  $banks = @{}
-  $pkg.Entries | Where-Object { $_.FullName -match '/audio/fmodanthem/durango/PG_(.+)\.bank$' } | ForEach-Object { $banks[$Matches[1].ToLower()] = 1 }
-  $audioXml = @{}
-  $pkg.Entries | Where-Object { $_.FullName -match '/media/audio/cars/(.+)\.xml$' } | ForEach-Object { $audioXml[$Matches[1].ToLower()] = 1 }
-} finally { $pkg.Dispose() }
+  Copy-StockFile 'media\stripped\gamedbRC.slt' $fh2Db
+  $banks = @{}; $audioXml = @{}
+  foreach ($k in $script:Stock.Hashes.Keys) {
+    if ($k -match '^media\\audio\\fmodanthem\\durango\\pg_(.+)\.bank$') { $banks[$Matches[1]] = 1 }
+    elseif ($k -match '^media\\audio\\cars\\(.+)\.xml$') { $audioXml[$Matches[1]] = 1 }
+  }
+} finally { Close-StockSource }
 
 $attach = @("ATTACH 'file:$($fh2Db.Replace('\','/'))?immutable=1' AS fh;", "ATTACH 'file:$((Resolve-Path $Fm5Db).Path.Replace('\','/'))?immutable=1' AS fm;")
 function Q([string]$sql) {
@@ -66,9 +70,18 @@ function Cols([string]$db, [string]$t) { Q "SELECT name FROM pragma_table_info('
 function Pk([string]$db, [string]$t) { Q "SELECT name FROM pragma_table_info('$t', '$db') WHERE pk > 0 ORDER BY pk" }
 function In([object[]]$v) { if ($v.Count) { '(' + ($v -join ',') + ')' } else { '(NULL)' } }
 
-$car = @(Q "SELECT MediaName, MakeID, Year FROM fm.Data_Car WHERE Id = $CarId")
-if (-not $car) { throw "Car $CarId not found in $Fm5Db" }
-$media, $makeId, $year = $car[0].Split('|')
+if ($Car) {
+  if ($Car -match '^\d+$') { $CarId = [int]$Car }
+  else { $CarId = [int]@(Q "SELECT Id FROM fm.Data_Car WHERE MediaName = '$($Car.Replace("'", ''))' COLLATE NOCASE")[0]; if (-not $CarId) { throw "FM5 has no car named $Car" } }
+}
+if (-not $CarId) { throw 'Pass -Car <FM5 MediaName or Id>' }
+if ($Donor) {
+  if ($Donor -match '^\d+$') { $DonorCarId = [int]$Donor }
+  else { $DonorCarId = [int]@(Q "SELECT Id FROM fh.Data_Car WHERE MediaName = '$($Donor.Replace("'", ''))' COLLATE NOCASE")[0]; if (-not $DonorCarId) { throw "FH2 has no car named $Donor" } }
+}
+$carRow = @(Q "SELECT MediaName, MakeID, Year FROM fm.Data_Car WHERE Id = $CarId")
+if (-not $carRow) { throw "Car $CarId not found in $Fm5Db" }
+$media, $makeId, $year = $carRow[0].Split('|')
 if (Q "SELECT 1 FROM fh.Data_Car WHERE Id = $CarId") { throw "Car Id $CarId already exists in FH2 ($(Q "SELECT MediaName FROM fh.Data_Car WHERE Id = $CarId"))" }
 if (-not $Mod) { $Mod = 'fm5-' + $media.ToLower().Replace('_', '-') }
 Write-Host "Exporting $media (Id $CarId) -> mods\$Mod"
@@ -194,6 +207,10 @@ if (-not $DonorCarId) {
   if (-not $DonorCarId) { $DonorCarId = [int]@(Q "SELECT Id FROM fh.Data_Car ORDER BY abs(Year - $year), Id LIMIT 1")[0] }
 }
 $donor = @(Q "SELECT MediaName FROM fh.Data_Car WHERE Id = $DonorCarId")[0]
+if (-not $donor) { throw "FH2 has no car with Id $DonorCarId" }
+$donorBank = @(Q "SELECT e.MediaName FROM fh.List_UpgradeEngine u JOIN fh.Data_Engine e ON e.EngineID = u.EngineID WHERE u.Ordinal = $DonorCarId ORDER BY u.IsStock DESC, u.Level LIMIT 1")[0]
+if (-not $donorBank -or -not $banks.ContainsKey($donorBank.ToLower())) { throw "Donor $donor has no engine sound bank" }
+if (-not $EngineSound -and -not $UseFm5Sound) { $EngineSound = $donorBank }
 $fhOnly = @(Cols 'fh' 'Data_Car' | Where-Object { (Cols 'fm' 'Data_Car') -notcontains $_ })
 if (-not $Thumbnail) { $Thumbnail = @(Q "SELECT Thumbnail FROM fh.Data_Car WHERE Id = $DonorCarId")[0] }
 [void]$sb.AppendLine("-- Data_Car fix-ups: FH2-only columns from donor $donor (Id $DonorCarId), no license gate, FH2 thumbnail path")
@@ -216,7 +233,7 @@ foreach ($en in $engines) {
   if (-not $em -or $banks.ContainsKey($em.ToLower())) { continue }
   if ((Q "SELECT 1 FROM fh.Data_Engine WHERE EngineID = $en")) { continue }   # existing FH2 engine: not ours to change
   if ($EngineSound) {
-    # borrowed FH2 sound wins: FM5 banks renamed PG_<engine>.bank turned out silent for the Trans Am
+    # FH2 sound (the donor's unless -EngineSound): FM5 banks renamed PG_<engine>.bank turned out silent for the Trans Am
     if (-not $banks.ContainsKey($EngineSound.ToLower())) { throw "FH2 has no PG_$EngineSound.bank to borrow" }
     [void]$sb.AppendLine("UPDATE Data_Engine SET MediaName = '$EngineSound' WHERE EngineID = $en;   -- engine sound borrowed from FH2")
     $report += "sound   engine $en ($em) -> FH2 $EngineSound"
@@ -228,15 +245,13 @@ foreach ($en in $engines) {
 }
 
 # --- write mod folder ---
-$modDir = Join-Path $root "mods\$Mod"
+$modDir = Join-Path $(if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }) $Mod
 $sqlDir = Join-Path $modDir 'media\stripped\gamedbRC.slt'
 New-Item -ItemType Directory $sqlDir -Force | Out-Null
 $sqlPath = Join-Path $sqlDir "$CarId-$media.sql"
 [IO.File]::WriteAllText($sqlPath, $sb.ToString())
 # Index donors: every new file needs a Mount\hash.manifest record whose 4-byte metadata is copied from a similar stock
 # file (meaning unknown; this is what the working GT500 import did). Use the donor car's own files.
-$donorBank = @(Q "SELECT e.MediaName FROM fh.List_UpgradeEngine u JOIN fh.Data_Engine e ON e.EngineID = u.EngineID WHERE u.Ordinal = $DonorCarId ORDER BY u.IsStock DESC, u.Level LIMIT 1")[0]
-if (-not $donorBank -or -not $banks.ContainsKey($donorBank.ToLower())) { throw "Donor $donor has no engine sound bank to use as index donor" }
 $donorBankPath = "audio\fmodanthem\durango\PG_$donorBank.bank"
 $donorXmlPath = if ($audioXml.ContainsKey($donor.ToLower())) { "audio\cars\$donor.xml" } else { $donorBankPath }
 $donorLines = foreach ($l in $importLines) {

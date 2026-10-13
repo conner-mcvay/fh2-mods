@@ -8,9 +8,9 @@
     mods\<name>\media\stripped\gamedbRC.slt\*.sql          folder named like a .slt: SQL patches, applied in name order
     mods\<name>\media\<path>\<file>                        anything else: loose file copied as-is
 
-  Stock zips, databases and zipmanifest.xml are read from the game package (.zip of the Anthem_* folder),
-  so a build never depends on an already-modded install. Mods are applied in the order given, so several
-  mods can patch the same zip or database; later mods win on conflicts.
+  Stock zips, databases and zipmanifest.xml are read from the game package (.zip of the Anthem_* folder) or from a
+  game folder whose files are verified against tools\stock-hashes.json, so a build never starts from a modded file.
+  Mods are applied in the order given, so several mods can patch the same zip or database; later mods win on conflicts.
 
   Output: dist\<name>.zip with the changed media files, zipmanifest.xml (if any zip changed), README.txt
   (each mod's README, {{MANIFEST_VALUES}} filled in) and tools\Repack-ForzaZip.ps1 (if any zip changed).
@@ -23,23 +23,25 @@
 param(
   [Parameter(Mandatory)][string[]]$Mod,
   [string]$Name,
-  [string]$Package = $env:FH2_PACKAGE,
+  [string]$Package = $env:FH2_PACKAGE,   # stock source: the game package zip...
+  [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
   [string]$Sqlite = $env:FH2_SQLITE,
   [string]$Fm5Media = $env:FH2_FM5_MEDIA
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-if (-not $Package) { throw 'Pass -Package <path to Anthem_*.zip> or set FH2_PACKAGE' }
+. (Join-Path $PSScriptRoot 'StockSource.ps1')
 if (-not $Name) { if ($Mod.Count -eq 1) { $Name = $Mod[0] } else { throw 'Pass -Name when building several mods together' } }
+if ($Game) { Open-StockSource -Game $Game } else { Open-StockSource -Package $Package }
 
 $root = Split-Path $PSScriptRoot
+$modsRoot = if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }   # generated mods can live outside the repo
 $build = Join-Path $root "build\$Name"
 $dist = Join-Path $root 'dist'
 $work = Join-Path $root "build\.work-$Name"
 foreach ($d in $build, $work) { if (Test-Path $d) { Remove-Item -Recurse -Force $d } }
 New-Item -ItemType Directory "$build\media", $work, $dist -Force | Out-Null
 
-$pkg = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Package).Path)
 $imports = @{}   # rel path -> FM5 source file (from a mod's imports.txt)
 function Get-Stock([string]$rel, [string]$dest) {
   # Copies a stock media file (or an imported FM5 file) to $dest unless an earlier mod in this build already produced it
@@ -49,11 +51,7 @@ function Get-Stock([string]$rel, [string]$dest) {
     Copy-Item $imports[$rel] $dest
     return
   }
-  $suffix = '/Mount/media/' + $rel.Replace('\', '/')
-  $e = $pkg.Entries | Where-Object { $_.FullName.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
-  if (-not $e) { throw "Stock file not found in package: media\$rel" }
-  New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null
-  [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest)
+  Copy-StockFile "media\$rel" $dest
 }
 function Read-Fm5([string]$rel, [string]$dest) {
   # Copies an FM5 media file to $dest; a path segment ending in .zip reads the entry inside that zip
@@ -92,7 +90,7 @@ $fm5CarZips = @()   # FM5 car zips whose models get converted for FH2's shaders
 $indexDonors = @{}   # new media path (lower) -> stock media path whose index metadata it reuses (from index-donors.txt)
 try {
   foreach ($m in $Mod) {
-    $modDir = Join-Path $root "mods\$m"
+    $modDir = Join-Path $modsRoot $m
     $modMedia = Join-Path $modDir 'media'
     if (-not (Test-Path $modMedia)) { throw "No media folder in $modDir" }
     if (Test-Path "$modDir\README.txt") { $readmes += "$modDir\README.txt" }
@@ -168,11 +166,10 @@ try {
     # the converter reads FH2's material and shader libraries to learn what each mesh's shader needs
     foreach ($lib in 'cars\_library\Materials.zip', '_library\Shaders.zip') { Get-Stock $lib (Join-Path $work "stock\$lib") }
   }
-  $stockFiles = @{}
-  foreach ($e in $pkg.Entries) { if ($e.FullName -match '/Mount/media/(.+)$' -and $e.Name) { $stockFiles[$Matches[1].Replace('/', '\').ToLower()] = 1 } }
-  $ie = $pkg.Entries | Where-Object { $_.FullName -like '*/Mount/hash.manifest' } | Select-Object -First 1
-  $ms = New-Object IO.MemoryStream; $s = $ie.Open(); $s.CopyTo($ms); $s.Close(); $stockIndex = $ms.ToArray()
-} finally { $pkg.Dispose() }
+  # the stock file index decides what's stock: a media file is stock exactly when its path key is in it
+  Copy-StockFile 'hash.manifest' (Join-Path $work 'stock\hash.manifest')
+  $stockIndex = [IO.File]::ReadAllBytes((Join-Path $work 'stock\hash.manifest'))
+} finally { }
 
 # FM5 car models: add the vertex inputs FH2's shaders read (tangents, extra UV sets); without them glass,
 # light lenses, decals and badges aren't drawn
@@ -236,11 +233,12 @@ Remove-Item -Recurse -Force $work
 
 # files the stock game doesn't have are invisible to Azimuth until listed in Mount\hash.manifest:
 # append a record per new file (path key + metadata copied from its donor) and ship the patcher for azimuth.exe
-$new = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring("$build\media".Length + 1) } | Where-Object { -not $stockFiles.ContainsKey($_.ToLower()) } | Sort-Object)
+if (-not ('ForzaPathKey' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'ForzaPathKey.cs') }
+$records = @{}
+for ($i = 0; $i -lt $stockIndex.Length; $i += 12) { $records[[BitConverter]::ToUInt64($stockIndex, $i)] = [BitConverter]::ToUInt32($stockIndex, $i + 8) }
+$stockKeys = New-Object 'System.Collections.Generic.HashSet[uint64]'; foreach ($k in $records.Keys) { [void]$stockKeys.Add($k) }
+$new = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring("$build\media".Length + 1) } | Where-Object { -not $records.ContainsKey([ForzaPathKey]::Compute("media\$_")) } | Sort-Object)
 if ($new.Count) {
-  if (-not ('ForzaPathKey' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'ForzaPathKey.cs') }
-  $records = @{}
-  for ($i = 0; $i -lt $stockIndex.Length; $i += 12) { $records[[BitConverter]::ToUInt64($stockIndex, $i)] = [BitConverter]::ToUInt32($stockIndex, $i + 8) }
   $out = New-Object IO.MemoryStream
   $out.Write($stockIndex, 0, $stockIndex.Length)
   foreach ($n in $new) {
@@ -265,20 +263,16 @@ if ($new.Count) {
 function Get-Sha([byte[]]$b) { -join ([Security.Cryptography.SHA256]::Create().ComputeHash($b) | ForEach-Object { $_.ToString('x2') }) }
 $payload = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring($build.Length + 1) })
 if (Test-Path "$build\hash.manifest") { $payload += 'hash.manifest' }
-$pkg = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Package).Path)
 try {
-  function Get-StockSha([string]$mountRel) {
-    $suffix = '/Mount/' + $mountRel.Replace('\', '/')
-    $e = $pkg.Entries | Where-Object { $_.FullName.EndsWith($suffix, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
-    if (-not $e) { return $null }
-    $s = $e.Open(); try { (-join ([Security.Cryptography.SHA256]::Create().ComputeHash($s) | ForEach-Object { $_.ToString('x2') })) } finally { $s.Close() }
-  }
   $files = foreach ($p in $payload) {
-    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); stock_sha256 = Get-StockSha $p }
+    $isStock = ($p -eq 'hash.manifest') -or $stockKeys.Contains([ForzaPathKey]::Compute($p))
+    $stockSha = if ($isStock) { Get-StockHash $p } else { $null }
+    if ($isStock -and -not $stockSha) { Write-Warning "No stock hash for Mount\$p; the installer will treat it as a new file" }
+    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); stock_sha256 = $stockSha }
   }
-  $gameSha = Get-StockSha 'forza_durango_release_final.exe'
-} finally { $pkg.Dispose() }
-$version = if ((Split-Path $Package -Leaf) -match '_(\d+\.\d+\.\d+\.\d+)_') { $Matches[1] } else { 'unknown' }
+  $gameSha = Get-StockHash 'forza_durango_release_final.exe'
+} finally { Close-StockSource }
+$version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json).game -match '(\d+\.\d+\.\d+\.\d+)') { $Matches[1] } else { 'unknown' }
 [ordered]@{
   name = $Name; mods = $Mod; game_version = $version; game_exe_sha256 = $gameSha
   azimuth_version = '0.9.7'; azimuth_stock_sha256 = '5d3ce30b440dab2604fe42ff7cd129394f0b98418e22b2a44270f548199bc6a9'

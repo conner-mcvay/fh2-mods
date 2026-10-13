@@ -62,7 +62,22 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
 .\tools\Patch-Azimuth.ps1 -Azimuth <stock azimuth.exe> -Index <Mount\hash.manifest> -Out <azimuth folder>\azimuth.exe
 ```
 
-## Importing FM5 cars
+## Importing FM5 cars (end users)
+
+`tools\Import-Fm5Cars.ps1` imports any FM5 car from your own installs; this repo ships no game files. You need FH2 1.0.0.64 (stock files, or this tool's previous import) on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
+
+```powershell
+# which FM5 cars FH2 doesn't have
+.\tools\Import-Fm5Cars.ps1 -ListFm5Only -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe"
+
+# import: one FH2 donor per car (FH2-only car data, Autoshow group, engine sound unless -EngineSound)
+.\tools\Import-Fm5Cars.ps1 -Fm5Root "D:\Forza_1.0.0.20_x64__8wekyb3d8bbwe" -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" -AzimuthRoot "D:\azimuth" `
+    -Car PON_TransAm_02,AST_DBS_09 -Donor PON_TransAmGTA_87,AST_DBSTF_08 -EngineSound CHE_CorvetteZR1_95,""
+```
+
+It verifies the game files it reads are stock (`tools\stock-hashes.json`, hashes only), generates each car's mod in a private workspace, builds one combined install (models converted for FH2's shaders), and installs it with backups. Running it again uninstalls the previous import first, so pass the full car list every time. Undo with the `Uninstall.ps1` kept in the printed backup folder. `-NoInstall` builds only.
+
+## Importing FM5 cars (repo mods)
 
 ```powershell
 .\tools\Export-Fm5Car.ps1 -CarId 1065 -Fm5Media G:\FM5\Forza_1.0.0.20_x64__8wekyb3d8bbwe\Mount\media

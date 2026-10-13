@@ -73,6 +73,7 @@ try {
   }
   [pscustomobject]@{ mod = $m.name; game_root = $GameRoot; azimuth_root = $AzimuthRoot; files = $record; azimuth = $az } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backup 'restore.json') -Encoding UTF8
+  Copy-Item -LiteralPath (Join-Path $pkg 'Uninstall.ps1') -Destination $backup   # undo works without this package
 } catch {
   Write-Warning "Install failed; rolling back. $_"
   foreach ($r in $record) {
