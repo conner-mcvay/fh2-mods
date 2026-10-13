@@ -28,6 +28,8 @@ param(
                                              #   outer-bulb (only the outboard bulb of twin-reflector lamps glows)
   [string[]]$PresetFrom,                     # per car, optional: a car whose headlight and beam presets (colour,
                                              #   beam pattern) to use instead of the donor's, e.g. a whiter halogen
+  [string[]]$HeadlightColor,                 # per car, optional: "r,g,b" (0-1) for the headlight preset's colour
+                                             #   (FH2's halogens are 1,0.8,0.6 / 1,0.7,0.4 / 1,0.5,0.3)
   [string[]]$GraphFrom,                      # per car, optional: a car whose animation graph (.gsf) to use, e.g. when
                                              #   the car's own doesn't raise its pop-ups in FH2 ("" = keep its own)
   [string]$GameRoot, [string]$AzimuthRoot,
@@ -45,7 +47,7 @@ if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $A
 if (-not $GameRoot) { throw 'Pass -GameRoot (or run Import-Fm5Cars once so it''s remembered)' }
 if (-not $NoInstall -and -not $AzimuthRoot) { throw 'Pass -AzimuthRoot' }
 if ($Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
-foreach ($pn in 'HeadlightStyle', 'PresetFrom') { $pv = Get-Variable $pn -ValueOnly; if ($pv -and $pv.Count -ne $Car.Count) { throw "-$pn needs one entry per -Car (use "" for the default)" } }
+foreach ($pn in 'HeadlightStyle', 'PresetFrom', 'HeadlightColor') { $pv = Get-Variable $pn -ValueOnly; if ($pv -and $pv.Count -ne $Car.Count) { throw "-$pn needs one entry per -Car (use "" for the default)" } }
 if ($GraphFrom -and $GraphFrom.Count -ne $Car.Count) { throw '-GraphFrom needs one entry per -Car (use "" for none)' }
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
 if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
@@ -64,6 +66,21 @@ function Read-Entries([string]$zip) {   # entry name (lowercase, '/') -> bytes, 
 function Bounds([hashtable]$entries, [string]$name) {   # [minx,miny,minz,maxx,maxy,maxz] of a model, cached
   if (-not $entries.ContainsKey($name)) { return $null }
   $k = "bounds:$name"; if (-not $entries.ContainsKey($k)) { $entries[$k] = [ModelBounds]::Of($entries[$name]) }; $entries[$k]
+}
+function Assembly([hashtable]$entries, $role, [string]$ref) {
+  # union box of a car's car-space models with this lamp role (kind + side) in the same place as the lamp model $ref
+  # (same folder, same end of the car): housing, glass and bulbs together. Models on a pop-up bone (modelled near
+  # the origin) don't count; $null when there are none.
+  if ($role.Kind -eq 'other') { return $null }
+  $rb = Bounds $entries $ref; if (-not $rb) { return $null }
+  $end = [math]::Sign((Center $rb)[2]); $folder = ($ref -split '/')[-2]
+  $u = $null
+  foreach ($k in @($entries.Keys | Where-Object { $_ -like 'scene/exterior/*.modelbin' })) {
+    $r = Role $k; if ($r.Kind -ne $role.Kind -or $r.Side -ne $role.Side -or ($k -split '/')[-2] -ne $folder) { continue }
+    $b = Bounds $entries $k; if (-not $b -or [math]::Abs((Center $b)[2]) -lt 1.0 -or [math]::Sign((Center $b)[2]) -ne $end) { continue }
+    if (-not $u) { $u = [double[]]$b.Clone() } else { for ($a = 0; $a -lt 3; $a++) { $u[$a] = [math]::Min($u[$a], $b[$a]); $u[$a + 3] = [math]::Max($u[$a + 3], $b[$a + 3]) } }
+  }
+  $u
 }
 function Center($b) { @((($b[0] + $b[3]) / 2), (($b[1] + $b[4]) / 2), (($b[2] + $b[5]) / 2)) }
 
@@ -184,18 +201,25 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   for ($i = 0; $i -lt $n; $i++) {
     $o = 4 + 76 * $i; $mi = [BitConverter]::ToInt32($rest, $o + 8)
     $pz = [BitConverter]::ToSingle($rest, $o + 20)
-    $delta = $null; $how = ''
+    $delta = $null; $affine = $null; $how = ''
     if ($mi -ge 0 -and $mi -lt $map.Count) {
-      $donorLamp = Bounds $D $map[$mi].Donor; $carLamp = Bounds $T $map[$mi].Target
-      # lamps modelled in car space (not on a pop-up/animated bone) sit well away from the origin along z
-      if ($donorLamp -and $carLamp -and [math]::Abs((Center $donorLamp)[2]) -gt 1.0 -and [math]::Abs((Center $carLamp)[2]) -gt 1.0) {
-        $dc = Center $donorLamp; $tc = Center $carLamp; $delta = @(($tc[0] - $dc[0]), ($tc[1] - $dc[1]), ($tc[2] - $dc[2])); $how = 'lamp'
+      # car-space lamps: a lamp's lights spread over its whole assembly (brake, indicator and reverse across a tail
+      # cluster), so they're mapped from the donor's assembly box (housing + glass + bulbs of that lamp) onto the car's
+      $role = Role $map[$mi].Donor
+      $da = Assembly $D $role $map[$mi].Donor; $ta = Assembly $T $role $map[$mi].Target
+      if ($da -and $ta) { $affine = @{ D = $da; T = $ta }; $how = 'lamp assembly' }
+      else {
+        $donorLamp = Bounds $D $map[$mi].Donor; $carLamp = Bounds $T $map[$mi].Target
+        # lamps modelled in car space (not on a pop-up/animated bone) sit well away from the origin along z
+        if ($donorLamp -and $carLamp -and [math]::Abs((Center $donorLamp)[2]) -gt 1.0 -and [math]::Abs((Center $carLamp)[2]) -gt 1.0) {
+          $dc = Center $donorLamp; $tc = Center $carLamp; $delta = @(($tc[0] - $dc[0]), ($tc[1] - $dc[1]), ($tc[2] - $dc[2])); $how = 'lamp'
+        }
       }
     }
     # pop-up lamps: lights are stored in the closed pose and the game turns them with the bone as it opens, so they
     # are re-aimed from the donor's closed lens (centre + facing, from its normals) onto the car's closed lens
     $frame = $null
-    if (-not $delta -and $mi -ge 0 -and $mi -lt $map.Count -and $map[$mi].Bone -like 'boneheadlight*' -and $donorBones.ContainsKey($map[$mi].Bone) -and $carBones.ContainsKey($map[$mi].Bone)) {
+    if (-not $delta -and -not $affine -and $mi -ge 0 -and $mi -lt $map.Count -and $map[$mi].Bone -like 'boneheadlight*' -and $donorBones.ContainsKey($map[$mi].Bone) -and $carBones.ContainsKey($map[$mi].Bone)) {
       $bn = $map[$mi].Bone
       # the car's lens: its headlight glass, else the housing (lens modelled into it)
       $carModel = $map[$mi].Target; $r0 = Role $carModel
@@ -214,7 +238,16 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     foreach ($pose in 0, 32) {
       $p = $o + 12 + $pose
       $x = [BitConverter]::ToSingle($rest, $p); $y = [BitConverter]::ToSingle($rest, $p + 4); $z = [BitConverter]::ToSingle($rest, $p + 8)
-      if ($delta) { $x += $delta[0]; $y += $delta[1]; $z += $delta[2] }
+      if ($affine) {
+        # x and y keep their place across the lamp (scaled to its size), z its depth relative to the lamp's centre
+        $boxD = $affine.D; $boxT = $affine.T; $xyz = @($x, $y, $z)
+        for ($ax = 0; $ax -lt 3; $ax++) {
+          $ds = $boxD[$ax + 3] - $boxD[$ax]; $ts = $boxT[$ax + 3] - $boxT[$ax]
+          $xyz[$ax] = if ($ax -lt 2 -and $ds -gt 0.02) { $boxT[$ax] + ($xyz[$ax] - $boxD[$ax]) * $ts / $ds } else { $xyz[$ax] - ($boxD[$ax] + $boxD[$ax + 3]) / 2 + ($boxT[$ax] + $boxT[$ax + 3]) / 2 }
+        }
+        $x, $y, $z = $xyz
+      }
+      elseif ($delta) { $x += $delta[0]; $y += $delta[1]; $z += $delta[2] }
       elseif ($frame) {
         $v = [Quat]::Rotate($frame.Q, @(($x - $frame.Cd[0]), ($y - $frame.Cd[1]), ($z - $frame.Cd[2])))
         $x = $frame.Ct[0] + $v[0]; $y = $frame.Ct[1] + $v[1]; $z = $frame.Ct[2] + $v[2]
@@ -265,6 +298,22 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
       [Array]::Copy($presetCar['lightpresets.bin'], $src.Offset, $presets, $fn.Offset, $src.Size)
       Write-Host "  preset $($fn.Name) -> $($src.Name) (from $pf)"
     }
+  }
+  if ($HeadlightColor -and $HeadlightColor[$ci]) {
+    $rgb = @($HeadlightColor[$ci] -split '\s*,\s*' | ForEach-Object { [single]$_ })
+    if ($rgb.Count -ne 3) { throw "-HeadlightColor for $c needs r,g,b (got $($HeadlightColor[$ci]))" }
+    # first property of a function block (after u32 size, u32): tag 0x02, 12 bytes = colour
+    $names = @([regex]::Matches([Text.Encoding]::ASCII.GetString($D['lightpresets.bin_debug']), 'PG_Function_[A-Za-z0-9_]+') | ForEach-Object Value | Select-Object -Unique)
+    $cnt = [BitConverter]::ToUInt32($presets, 12); $po = 16; $done = $false
+    for ($j = 0; $j -lt $cnt; $j++) {
+      $sz = [BitConverter]::ToUInt32($presets, $po)
+      if ($names[$j] -like 'PG_Function_Headlight_*' -and $presets[$po + 8] -eq 2 -and $presets[$po + 9] -eq 12) {
+        for ($k = 0; $k -lt 3; $k++) { [BitConverter]::GetBytes($rgb[$k]).CopyTo($presets, $po + 10 + 4 * $k) }
+        Write-Host "  preset $($names[$j]) colour -> $($rgb -join ', ')"; $done = $true
+      }
+      $po += $sz
+    }
+    if (-not $done) { Write-Warning "$c's light presets have no headlight colour to set" }
   }
   [IO.File]::WriteAllBytes((Join-Path $dir 'LightPresets.bin'), $presets)
 
