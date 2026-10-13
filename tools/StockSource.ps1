@@ -42,7 +42,10 @@ function Get-StockHash([string]$rel) {   # stock SHA-256 of a file, or $null whe
 function Get-BaseHash([string]$rel) {   # SHA-256 of the file a build starts from, or $null when the base has no such file
   if (-not $script:Stock.Layer) { return Get-StockHash $rel }
   $p = Join-Path $script:Stock.Mount $rel
-  if (Test-Path -LiteralPath $p) { return (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+  if (Test-Path -LiteralPath $p) {
+    try { return (Get-FileHash -LiteralPath $p -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() }
+    catch { throw "Can't read Mount\$rel; close the game first. ($($_.Exception.Message))" }
+  }
   return $null
 }
 

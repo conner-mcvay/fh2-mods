@@ -6,6 +6,7 @@ Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.
 |---|---|
 | [cockpit-fov](mods/cockpit-fov) | Cockpit/driver camera FOV 48 → 70 |
 | [dlc-unlock](mods/dlc-unlock) | DLC and bonus cars can be bought in the Autoshow without the Xbox Live license check |
+| [stock-wheel-swap](mods/stock-wheel-swap) | Every car's stock wheels can be fitted to any car, listed under the car's brand |
 | [fm5-pon-transam-02](mods/fm5-pon-transam-02) | FM5's 2002 Pontiac Trans Am as a new car; sound borrowed from the '95 Corvette ZR-1. Name shows blank; night lighting unchecked |
 
 ## Layout
