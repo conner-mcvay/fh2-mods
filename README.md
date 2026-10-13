@@ -99,6 +99,17 @@ It checks the game version, generates each car's mod in a private workspace, bui
 
 Each imported car's stock wheel is also put in the wheel shop for any car, like [stock-wheel-swap](mods/stock-wheel-swap) does for FH2's cars (its own wheel zip, converted from FM5, named from FM5's string table; `tools\fm5-import\WheelSwap.ps1`). `-NoWheelSwap` on `Export-Fm5Car.ps1` skips it. For cars imported before this, run `tools\fm5-import\Add-ImportedCarWheels.ps1`: it finds imported cars (FM5 cars not in `tools\build\stock-cars.txt`) whose wheel isn't in the shop and installs their wheels as one more layer.
 
+### Night lights (experimental)
+
+FM5 cars have no night lighting data, so imported cars are dark at night. `tools\fm5-import\Add-CarLights.ps1 -Car <imported car> -Donor <FH2 car>` transplants it from a similar FH2 car (one with pop-ups for a pop-up car) and installs it as a layer:
+
+- `Lights.bin` lists the lamp meshes (with light ids) and the light sources (kind: headlight 17, tail/brake/reverse 1/32/69, CHMSL 0; the lamp mesh it belongs to; two poses in car space). The donor's lamp meshes are matched by role (side, headlight/taillight/CHMSL/fog, glass/bulbs/housing) to the car's own. Each light moves by the offset between the donor's lamp and the car's lamp; lights on pop-up headlights (lamp meshes modelled in the `boneHeadlightL/R` bone's space) move by the offset between the two cars' headlight bones; anything else is placed relative to the bumper.
+- `LightPresets.bin` (beams, intensities, projection textures) is copied as is.
+
+```powershell
+.\tools\fm5-import\Add-CarLights.ps1 -Car PON_TransAm_02,CHE_CorvetteZ06_02 -Donor PON_TransAmGTA_87,CHE_CorvetteZR1_95
+```
+
 ### One car as a repo mod
 
 For a car you want to ship from the repo as its own mod (the importer is the usual way; the 2002 Trans Am that used to live in `mods/` is just `Import-Fm5Cars.cmd` now):

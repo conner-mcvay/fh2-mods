@@ -1,0 +1,177 @@
+<#
+.SYNOPSIS
+  Gives an imported FM5 car night lights, transplanted from a similar FH2 car.
+
+.DESCRIPTION
+  FH2 cars carry two light files that FM5 cars don't have (FM5 has no night):
+    Lights.bin        the car's lamp meshes (each with a light id) and its light sources: per light a kind (headlight,
+                      tail/brake, reverse, CHMSL ...), the lamp mesh it belongs to, and two poses (position + rotation,
+                      car space)
+    LightPresets.bin  beam shapes, intensities and projection textures (nothing car-specific)
+  This copies both from a donor and fits them to the imported car: the donor's lamp meshes are matched by role
+  (left/right headlight, taillight, CHMSL, fog light; glass, bulbs or housing) to the car's own, and each light is
+  moved by the offset between its donor lamp and the matching lamp of the car. Lamps on pop-up or other animated
+  parts are modelled in their bone's space, so those lights are placed relative to the front/rear bumper instead.
+  Pick a donor of the same shape, with pop-ups if the car has them (e.g. PON_TransAmGTA_87 for the 2002 Trans Am,
+  CHE_CorvetteZR1_95 for the 2002 Corvette). Installed as one more layer (undo with its backup's Uninstall.ps1).
+
+.EXAMPLE
+  .\tools\fm5-import\Add-CarLights.ps1 -Car PON_TransAm_02 -Donor PON_TransAmGTA_87
+.EXAMPLE
+  .\tools\fm5-import\Add-CarLights.ps1 -Car PON_TransAm_02,CHE_CorvetteZ06_02 -Donor PON_TransAmGTA_87,CHE_CorvetteZR1_95 -NoInstall
+#>
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory)][string[]]$Car,      # imported cars (MediaName)
+  [Parameter(Mandatory)][string[]]$Donor,    # FH2 light donor per car
+  [string]$GameRoot, [string]$AzimuthRoot,
+  [string]$Name = 'car-lights',
+  [string]$Sqlite = $env:FH2_SQLITE,
+  [switch]$NoInstall
+)
+$ErrorActionPreference = 'Stop'
+$tools = $PSScriptRoot; $root = Split-Path (Split-Path $tools); $bin = Join-Path (Split-Path $tools) 'bin'
+Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
+if (-not ('LightsFile' -as [type])) { Add-Type -Path (Join-Path $tools 'ForzaModel.cs'), (Join-Path $tools 'CarLights.cs') -ReferencedAssemblies System.Core }
+$settingsPath = Join-Path $env:LOCALAPPDATA 'fh2-mods\import-fm5-cars.json'
+$saved = if (Test-Path $settingsPath) { Get-Content $settingsPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $AzimuthRoot = $saved.AzimuthRoot }
+if (-not $GameRoot) { throw 'Pass -GameRoot (or run Import-Fm5Cars once so it''s remembered)' }
+if (-not $NoInstall -and -not $AzimuthRoot) { throw 'Pass -AzimuthRoot' }
+if ($Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
+if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
+if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
+$cars = Join-Path $GameRoot 'Mount\media\cars'
+
+function Read-Entries([string]$zip) {   # entry name (lowercase, '/') -> bytes, for the light files and exterior models
+  $z = [IO.Compression.ZipFile]::OpenRead($zip); $h = @{}
+  try {
+    foreach ($e in $z.Entries) {
+      if ($e.FullName -notmatch '(?i)^(Lights\.bin|LightPresets\.bin|scene/exterior/.+\.modelbin|scene/[^/]+_skeleton\.modelbin)$') { continue }
+      $ms = New-Object IO.MemoryStream; $s = $e.Open(); $s.CopyTo($ms); $s.Close(); $h[$e.FullName.ToLower()] = $ms.ToArray()
+    }
+  } finally { $z.Dispose() }
+  $h
+}
+function Bounds([hashtable]$entries, [string]$name) {   # [minx,miny,minz,maxx,maxy,maxz] of a model, cached
+  if (-not $entries.ContainsKey($name)) { return $null }
+  $k = "bounds:$name"; if (-not $entries.ContainsKey($k)) { $entries[$k] = [ModelBounds]::Of($entries[$name]) }; $entries[$k]
+}
+function Center($b) { @((($b[0] + $b[3]) / 2), (($b[1] + $b[4]) / 2), (($b[2] + $b[5]) / 2)) }
+
+# lamp role of a model file: kind (head, tail, chmsl, fog, marker, other), side (l, r, c), part (glass, bulbs, main)
+function Role([string]$file) {
+  $n = [IO.Path]::GetFileNameWithoutExtension($file).ToLower() -replace '_[a-z]$', ''
+  $part = if ($n -like 'glass*') { 'glass' } elseif ($n -like '*bulbs*') { 'bulbs' } else { 'main' }
+  $n = $n -replace '^glass', '' -replace 'bulbs', ''
+  $kind, $side = switch -Regex ($n) {
+    'chmsl' { 'chmsl', 'c'; break }
+    '^(headlight|)([lr])hl$' { 'head', $Matches[2]; break }
+    '^headlight([lr])' { 'head', $Matches[1]; break }
+    '^(taillight|)([lr])tl$' { 'tail', $Matches[2]; break }
+    '^taillight([lrc])' { 'tail', $Matches[1]; break }
+    '^(foglight|)([lr])fl$' { 'fog', $Matches[2]; break }
+    '^foglight([lr])' { 'fog', $Matches[1]; break }
+    'sidemarker' { 'marker', $(if ($n -match 'sidemarkers?([lr])') { $Matches[1] } else { 'c' }); break }
+    default { 'other', 'c' }
+  }
+  [pscustomobject]@{ Kind = $kind; Side = $side; Part = $part }
+}
+function Match-Mesh([string]$donorPath, [string[]]$targetModels) {
+  # the target model for a donor lamp: same file, else same kind+side preferring the same part (glass > bulbs > main)
+  $file = ($donorPath -split '\\')[-1].ToLower()
+  $same = @($targetModels | Where-Object { ($_ -split '/')[-1] -eq $file }); if ($same) { return $same[0] }
+  $r = Role $file; if ($r.Kind -eq 'other') { return $null }
+  $cands = @($targetModels | Where-Object { $x = Role $_; $x.Kind -eq $r.Kind -and $x.Side -eq $r.Side })
+  if (-not $cands -and $r.Kind -eq 'marker') { $cands = @($targetModels | Where-Object { (Role $_).Kind -eq 'marker' }) }
+  if (-not $cands) { return $null }
+  $order = @{ glass = @('glass', 'bulbs', 'main'); bulbs = @('bulbs', 'glass', 'main'); main = @('main', 'glass', 'bulbs') }[$r.Part]
+  ($cands | Sort-Object { [array]::IndexOf($order, (Role $_).Part) }, { $_ })[0]
+}
+
+$ws = Join-Path $root "build\.lights-$Name"; if (Test-Path $ws) { Remove-Item -Recurse -Force $ws }
+$modDir = Join-Path $ws 'car-lights'
+for ($ci = 0; $ci -lt $Car.Count; $ci++) {
+  $c = $Car[$ci]; $dn = $Donor[$ci]
+  $tz = Get-ChildItem $cars -Filter "$c.zip" | Select-Object -First 1; $dz = Get-ChildItem $cars -Filter "$dn.zip" | Select-Object -First 1
+  if (-not $tz) { throw "$c isn't installed (no media\cars\$c.zip)" }; if (-not $dz) { throw "No FH2 car $dn" }
+  $T = Read-Entries $tz.FullName; $D = Read-Entries $dz.FullName
+  if (-not $D.ContainsKey('lights.bin')) { throw "$dn has no Lights.bin" }
+  if ($T.ContainsKey('lights.bin')) { Write-Warning "$c already has a Lights.bin; replacing it" }
+  $targetModels = @($T.Keys | Where-Object { $_ -like 'scene/exterior/*.modelbin' })
+  $lf = [LightsFile]::Read($D['lights.bin'])
+  Write-Host "$c <- lights of $dn"
+
+  # lamp meshes: same list order (light records refer to it by index), donor paths swapped for the car's own models
+  $map = @()
+  foreach ($m in $lf.Meshes) {
+    $rel = ($m.Path -replace '^game:\\media\\cars\\[^\\]+\\', '').Replace('\', '/').ToLower()
+    $lamp = Match-Mesh $m.Path $targetModels   # (not $t: PowerShell names are case-insensitive, $T is the car's files)
+    if (-not $lamp) { $lamp = ($targetModels | Where-Object { (Role $_).Kind -eq (Role $rel).Kind } | Select-Object -First 1) }
+    if (-not $lamp) { throw "$c has no lamp model for the donor's $rel" }
+    $map += [pscustomobject]@{ Donor = $rel; Target = $lamp }
+    $m.Path = "game:\media\cars\$($c.ToLower())\" + $lamp.Replace('/', '\')
+    Write-Host ("  lamp [{0,2}] {1,-44} -> {2}" -f $m.Id, ($rel -replace '^scene/exterior/', ''), ($lamp -replace '^scene/exterior/', ''))
+  }
+
+  # light records: count, then 76 bytes each: u32 index, u16 kind, u16 sub, u32 lamp mesh index, 2 x (pos xyzw, rot xyzw)
+  $rest = $lf.Rest; $n = [BitConverter]::ToInt32($rest, 0)
+  $front = @{ D = (Bounds $D 'scene/exterior/bumperf/bumperf_a.modelbin'); T = (Bounds $T 'scene/exterior/bumperf/bumperf_a.modelbin') }
+  $rear = @{ D = (Bounds $D 'scene/exterior/bumperr/bumperr_a.modelbin'); T = (Bounds $T 'scene/exterior/bumperr/bumperr_a.modelbin') }
+  # pop-up headlight hinges: lights on lamps modelled in a bone's space move with that bone
+  $boneOf = { param($entries) $k = $entries.Keys | Where-Object { $_ -match '^scene/[^/]+_skeleton\.modelbin$' } | Select-Object -First 1
+    $h = @{}; if ($k) { foreach ($b in [Skeleton]::Read($entries[$k])) { $h[$b.Name.ToLower()] = $b.World } }; $h }
+  $donorBones = & $boneOf $D; $carBones = & $boneOf $T
+  $moved = @{}
+  for ($i = 0; $i -lt $n; $i++) {
+    $o = 4 + 76 * $i; $mi = [BitConverter]::ToInt32($rest, $o + 8)
+    $pz = [BitConverter]::ToSingle($rest, $o + 20)
+    $delta = $null; $how = ''
+    if ($mi -ge 0 -and $mi -lt $map.Count) {
+      $donorLamp = Bounds $D $map[$mi].Donor; $carLamp = Bounds $T $map[$mi].Target
+      # lamps modelled in car space (not on a pop-up/animated bone) sit well away from the origin along z
+      if ($donorLamp -and $carLamp -and [math]::Abs((Center $donorLamp)[2]) -gt 1.0 -and [math]::Abs((Center $carLamp)[2]) -gt 1.0) {
+        $dc = Center $donorLamp; $tc = Center $carLamp; $delta = @(($tc[0] - $dc[0]), ($tc[1] - $dc[1]), ($tc[2] - $dc[2])); $how = 'lamp'
+      }
+    }
+    if (-not $delta) {
+      $px = [BitConverter]::ToSingle($rest, $o + 12)
+      $bn = if ($px -lt 0) { 'boneheadlightl' } else { 'boneheadlightr' }
+      if ($pz -ge 0 -and $donorBones.ContainsKey($bn) -and $carBones.ContainsKey($bn)) {
+        $delta = @(($carBones[$bn][12] - $donorBones[$bn][12]), ($carBones[$bn][13] - $donorBones[$bn][13]), ($carBones[$bn][14] - $donorBones[$bn][14])); $how = 'headlight bone'
+      }
+    }
+    foreach ($pose in 0, 32) {
+      $p = $o + 12 + $pose
+      $x = [BitConverter]::ToSingle($rest, $p); $y = [BitConverter]::ToSingle($rest, $p + 4); $z = [BitConverter]::ToSingle($rest, $p + 8)
+      if ($delta) { $x += $delta[0]; $y += $delta[1]; $z += $delta[2] }
+      else {
+        # relative to the bumper at that end: x and y scaled to its size, z kept at the same distance from its outer face
+        $B = if ($pz -ge 0) { $front } else { $rear }
+        if (-not $B.D -or -not $B.T) { throw "$c or $dn has no bumper model to place lights against" }
+        $dw = ($B.D[3] - $B.D[0]) / 2; $tw = ($B.T[3] - $B.T[0]) / 2
+        $x = $x * $tw / $dw
+        $y = $B.T[1] + ($y - $B.D[1]) * ($B.T[4] - $B.T[1]) / ($B.D[4] - $B.D[1])
+        $z = if ($pz -ge 0) { $z - $B.D[5] + $B.T[5] } else { $z - $B.D[2] + $B.T[2] }
+        $how = if ($pz -ge 0) { 'front bumper' } else { 'rear bumper' }
+      }
+      [BitConverter]::GetBytes([single]$x).CopyTo($rest, $p); [BitConverter]::GetBytes([single]$y).CopyTo($rest, $p + 4); [BitConverter]::GetBytes([single]$z).CopyTo($rest, $p + 8)
+    }
+    $moved[$how] = 1 + $moved[$how]
+  }
+  Write-Host ("  {0} lights placed: {1}" -f $n, (($moved.GetEnumerator() | ForEach-Object { "$($_.Value) by $($_.Key)" }) -join ', '))
+
+  $dir = Join-Path $modDir "media\cars\$($tz.Name)"
+  New-Item -ItemType Directory $dir -Force | Out-Null
+  [IO.File]::WriteAllBytes((Join-Path $dir 'Lights.bin'), $lf.Write())
+  [IO.File]::WriteAllBytes((Join-Path $dir 'LightPresets.bin'), $D['lightpresets.bin'])
+}
+
+$env:FH2_MODS_ROOT = $ws
+try {
+  $a = @{ Mod = 'car-lights'; Name = $Name; Game = $GameRoot; Layer = $true }; if ($Sqlite) { $a.Sqlite = $Sqlite }
+  & (Join-Path $tools '..\build\Build-Mod.ps1') @a 6>&1 3>&1 | Where-Object { "$_" -match '^(Built)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
+} finally { Remove-Item Env:FH2_MODS_ROOT }
+$release = Join-Path $root "build\$Name"
+if ($NoInstall) { Write-Host "Built $release (not installed)"; return }
+& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -AzimuthRoot $AzimuthRoot
