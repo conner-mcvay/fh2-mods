@@ -150,9 +150,16 @@ $enc = New-Object Text.UTF8Encoding($true)
 $xml = [IO.File]::ReadAllText($Manifest, $enc)
 $pattern = '(<Zip [^>]*path="' + [regex]::Escape($gamePath) + '"[^>]*?)dirstart="\d+" dirsize="\d+" direntries="\d+"'
 $rx = New-Object Text.RegularExpressions.Regex($pattern, 'IgnoreCase')
-if (-not $rx.IsMatch($xml)) { Write-Warning "No manifest entry for $gamePath"; return }
 if (-not (Test-Path "$Manifest.bak")) { Copy-Item $Manifest "$Manifest.bak" }
 # manifest dirsize covers the central directory plus the 22-byte end-of-central-directory record
-$xml = $rx.Replace($xml, ('${1}dirstart="' + $cdStart + '" dirsize="' + ($cdBytes.Length + 22) + '" direntries="' + $order.Count + '"'), 1)
+$values = 'dirstart="' + $cdStart + '" dirsize="' + ($cdBytes.Length + 22) + '" direntries="' + $order.Count + '"'
+if ($rx.IsMatch($xml)) {
+  $xml = $rx.Replace($xml, ('${1}' + $values), 1)
+  Write-Host "Updated manifest entry for $gamePath"
+} else {
+  # new zip (e.g. an imported car): add an entry in the same style as the stock ones
+  $line = '  <Zip version="1" path="' + $gamePath.ToLower() + '" priority="80" ' + $values + ' />'
+  $xml = $xml.Replace('</ZipFiles>', $line + "`r`n</ZipFiles>")
+  Write-Host "Added manifest entry for $gamePath"
+}
 [IO.File]::WriteAllText($Manifest, $xml, $enc)
-Write-Host "Updated manifest entry for $gamePath"

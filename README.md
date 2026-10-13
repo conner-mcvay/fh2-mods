@@ -6,6 +6,7 @@ Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.
 |---|---|
 | [cockpit-fov](mods/cockpit-fov) | Cockpit/driver camera FOV 48 → 70 |
 | [dlc-unlock](mods/dlc-unlock) | DLC and bonus cars can be bought in the Autoshow without the Xbox Live license check |
+| [fm5-pon-transam-02](mods/fm5-pon-transam-02) | **Experimental.** FM5's 2002 Pontiac Trans Am. Loads, drives and has its own sound; glass, decals and wheel center caps don't render yet and its name is blank |
 
 ## Layout
 
@@ -16,9 +17,14 @@ mods/<name>/
     <Archive>.zip/<entry>                   a folder named like a zip holds replacement/new entries for that zip
     stripped/gamedbRC.slt/<patch>.sql       a folder named like a .slt holds SQL patches, applied in name order
     <path>/<file>                           anything else is a loose file, copied as-is
+  imports.txt                             FM5 files to copy in: "<FH2 media path> <- <FM5 media path>" (a .zip segment = entry inside it)
+  index-donors.txt                        for each new file, the stock file whose hash.manifest metadata it reuses
 tools/
   Repack-ForzaZip.ps1                     repacks a media zip in FH2's native format and updates zipmanifest.xml
   Build-Mod.ps1                           builds dist/<name>.zip from stock game files + one or more mods
+  Export-Fm5Car.ps1                       generates an FM5 car import mod (SQL patch, imports, index donors, README)
+  Patch-Azimuth.ps1                       makes a copy of the stock Azimuth 0.9.7 launcher that accepts a given hash.manifest
+  ForzaPathKey.cs                         the hash.manifest path key
 ```
 
 Game files aren't committed. Builds read stock files from the game package, so they never depend on an already-modded install.
@@ -35,6 +41,31 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 - `-Package` can be set once via the `FH2_PACKAGE` environment variable.
 - SQL patches need [sqlite3.exe](https://www.sqlite.org/download.html) (the "sqlite-tools" bundle): pass `-Sqlite <path>`, set `FH2_SQLITE`, or put it on `PATH`.
 - Mods apply in the order given; on conflicts the later mod wins. Output goes to `dist/`.
+- Mods with an `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
+
+## Adding new files (imported cars)
+
+Azimuth only exposes files listed in `Mount\hash.manifest`, its file index. A new file that isn't listed is invisible to the game; a new car zip in `zipmanifest.xml` that the game can't open crashes it at startup. When a build adds files, it also writes `build\<name>\hash.manifest`: the stock index with one 12-byte record appended per new file.
+
+- Record: `u64` path key + `u32` metadata, little endian. The key is a DJB2-style mix run twice over the lowercase `media\...` path (see `tools/ForzaPathKey.cs`). It matches 2,312 of the 2,314 stock files, and the same function gives the same keys in FM5's own index.
+- The metadata's meaning is unknown. New files copy it from a similar stock file (`index-donors.txt`), as the working GT500 import did.
+- Azimuth 0.9.7 checks the index's exact size and SHA-256. `Patch-Azimuth.ps1` writes both into a copy of the stock launcher: the SHA-256 as ASCII hex at raw offset `0x252910`, the size as the `imm32` of `cmp qword [rbp-0x48]` at `0x1C06E8`. Keep the patched launcher named `azimuth.exe` (FH2_ExtraOptions checks the name). Restore the stock launcher together with the stock index.
+
+Install a build's `media\*` into `Mount\media`, its `hash.manifest` into `Mount`, then patch `azimuth.exe` from your untouched stock copy:
+
+```powershell
+.\tools\Patch-Azimuth.ps1 -Azimuth <stock azimuth.exe> -Index <Mount\hash.manifest> -Out <azimuth folder>\azimuth.exe
+```
+
+## Importing FM5 cars
+
+```powershell
+.\tools\Export-Fm5Car.ps1 -CarId 1065 -Fm5Media G:\FM5\Forza_1.0.0.20_x64__8wekyb3d8bbwe\Mount\media
+```
+
+The exporter walks every gamedb row the car depends on and writes them as INSERTs. It never overwrites an FH2 row; it reports key conflicts instead. Shared engines/drivetrains/bodies only get part rows FH2 has none of. It also lists the FM5 files to import and their index donors. What carries over as-is: the car zip (including the v13 `physicsdefinition.bin`), the engine sound (FM5's `<engine>.bank` works renamed to `PG_<engine>.bank`), the audio tuning XML, and the thumbnail (added into `stripped\RC0.zip`). FH2-only `Data_Car` columns and the `Data_Car_Buckets` row come from a donor FH2 car (default: same make, closest year).
+
+**Known gap:** FH2 doesn't draw mesh parts whose vertex layout has no `TANGENT` element. FM5 omits tangents on many flat parts (glass, light lenses, decals, wheel center caps), so those parts are invisible until the models are converted.
 
 ## How FH2 loads media zips
 
