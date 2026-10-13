@@ -35,6 +35,7 @@ param(
   [string]$Package = $env:FH2_PACKAGE,   # stock FH2 source: the game package zip...
   [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
   [switch]$Layer,                        # with -Game: build on the installed (possibly modded) files, e.g. earlier imports
+  [switch]$NoWheelSwap,                  # don't offer the car's stock wheel in the wheel shop for other cars
   [string]$Sqlite = $env:FH2_SQLITE
 )
 $ErrorActionPreference = 'Stop'
@@ -245,12 +246,33 @@ foreach ($en in $engines) {
   } else { $report += "SOUND   engine $en ($em): FH2 has no PG_$em.bank; pass -EngineSound to borrow one" }
 }
 
+# the car's stock wheel in the wheel shop for any car (tools\WheelSwap.ps1, as mods\stock-wheel-swap)
+$wheel = $null
+if (-not $NoWheelSwap) {
+  . (Join-Path $PSScriptRoot 'WheelSwap.ps1')
+  $wheelRow = @(Q "SELECT w.MediaName FROM fm.List_Wheels w JOIN fm.Data_Car c ON c.StockWheelID = w.ID WHERE c.Id = $CarId")
+  $wheelName = if ($wheelRow) { $wheelRow[0] }
+  if ($wheelName -and -not (Q "SELECT 1 FROM fh.List_Wheels WHERE MediaName = '$($wheelName.Replace("'", ''))' COLLATE NOCASE AND IsStock = 0")) {
+    $za = [IO.Compression.ZipFile]::OpenRead((Join-Path $Fm5Media "cars\$media.zip"))
+    try { $we = Find-CarWheelEntries $za $wheelName } finally { $za.Dispose() }
+    if ($we) {
+      $strings = Read-StringTable (Join-Path $Fm5Media 'stringtables\EN.zip') 'Data_Car.str'
+      $model = Resolve-String $strings (@(Q "SELECT DisplayName FROM fm.Data_Car WHERE Id = $CarId")[0])
+      $wheel = New-WheelSwapParts -Car $media -Wheel $wheelName -Name "$year $model".Trim() -CarZip "cars\$media.zip" -SourcePrefix '' -Entries $we
+      $importLines += $wheel.Imports
+      $report += "wheel   $wheelName -> wheel shop ('$year $model')"
+    } else { $report += "WHEEL   no wheel model found in cars\$media.zip; not added to the wheel shop" }
+  }
+}
+
 # --- write mod folder ---
 $modDir = Join-Path $(if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }) $Mod
 $sqlDir = Join-Path $modDir 'media\stripped\gamedbRC.slt'
 New-Item -ItemType Directory $sqlDir -Force | Out-Null
 $sqlPath = Join-Path $sqlDir "$CarId-$media.sql"
 [IO.File]::WriteAllText($sqlPath, $sb.ToString())
+# after the car's rows (name order): the wheel row comes with the car
+if ($wheel) { [IO.File]::WriteAllText((Join-Path $sqlDir "$CarId-$media.wheels.sql"), $wheel.Sql) }
 # Index donors: every new file needs a Mount\hash.manifest record whose 4-byte metadata is copied from a similar stock
 # file (meaning unknown; this is what the working GT500 import did). Use the donor car's own files.
 $donorBankPath = "audio\fmodanthem\durango\PG_$donorBank.bank"
@@ -261,6 +283,7 @@ $donorLines = foreach ($l in $importLines) {
   $d = switch -Wildcard ($dest) { 'cars\*.zip' { "cars\$donor.zip" } '*.bank' { $donorBankPath } 'audio\cars\*.xml' { $donorXmlPath } default { throw "No index donor rule for $dest" } }
   "$dest <- $d"
 }
+if ($wheel) { $donorLines = @($donorLines) + $wheel.Donors }
 [IO.File]::WriteAllText((Join-Path $modDir 'index-donors.txt'), "# <new media path> <- <stock media path whose hash.manifest metadata it copies>`r`n" + ($donorLines -join "`r`n") + "`r`n")
 
 [IO.File]::WriteAllText((Join-Path $modDir 'imports.txt'), "# <FH2 media path> <- <FM5 media path> (source: -Fm5Media / FH2_FM5_MEDIA); a .zip segment means an entry inside that zip`r`n" + ($importLines -join "`r`n") + "`r`n")

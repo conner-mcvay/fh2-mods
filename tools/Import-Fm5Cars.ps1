@@ -187,7 +187,7 @@ try {
     if ($p.engine) { $a.EngineSound = $p.engine }
     Write-Host ''
     # (the scripts report with Write-Host: filter the information stream to the useful lines)
-    & (Join-Path $tools 'Export-Fm5Car.ps1') @a 6>&1 | Where-Object { "$_" -match '^(Exporting|Donor|  (thumb|bucket|sound|SOUND|BUCKET|CONFLICT|MISSING))' } | ForEach-Object { Write-Host "$_" }
+    & (Join-Path $tools 'Export-Fm5Car.ps1') @a 6>&1 | Where-Object { "$_" -match '^(Exporting|Donor|  (thumb|bucket|sound|wheel|SOUND|BUCKET|WHEEL|CONFLICT|MISSING))' } | ForEach-Object { Write-Host "$_" }
     $mods += $mod
   }
   Write-Host "`nBuilding (converting models for FH2 takes a minute per car)..."

@@ -130,6 +130,8 @@ try {
         if ($dest -match '^(.*?\.zip)\\(.+)$' -and $Matches[2]) {
           $zr = $Matches[1]; $entry = $Matches[2]
           Use-Zip $zr
+          # FM5 models placed in a car or wheel zip need the same conversion as whole FM5 car zips
+          if ($from -notmatch '^fh2:' -and $entry -like '*.modelbin' -and $zr -like 'cars\*' -and $fm5CarZips -notcontains $zr) { $fm5CarZips += $zr }
           $target = Join-Path $zips[$zr] $entry
           New-Item -ItemType Directory (Split-Path $target) -Force | Out-Null
           Copy-Item -Force $tmp $target
