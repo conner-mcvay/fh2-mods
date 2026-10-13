@@ -24,6 +24,8 @@
 param(
   [Parameter(Mandatory)][string[]]$Car,      # imported cars (MediaName)
   [Parameter(Mandatory)][string[]]$Donor,    # FH2 light donor per car
+  [string[]]$GraphFrom,                      # per car, optional: a car whose animation graph (.gsf) to use, e.g. when
+                                             #   the car's own doesn't raise its pop-ups in FH2 ("" = keep its own)
   [string]$GameRoot, [string]$AzimuthRoot,
   [string]$Name = 'car-lights',
   [string]$Sqlite = $env:FH2_SQLITE,
@@ -39,6 +41,7 @@ if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $A
 if (-not $GameRoot) { throw 'Pass -GameRoot (or run Import-Fm5Cars once so it''s remembered)' }
 if (-not $NoInstall -and -not $AzimuthRoot) { throw 'Pass -AzimuthRoot' }
 if ($Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
+if ($GraphFrom -and $GraphFrom.Count -ne $Car.Count) { throw '-GraphFrom needs one entry per -Car (use "" for none)' }
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
 if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
 $cars = Join-Path $GameRoot 'Mount\media\cars'
@@ -111,6 +114,7 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   # lamp meshes: same list order (light records refer to it by index), donor paths swapped for the car's own models
   $map = @()
   foreach ($m in $lf.Meshes) {
+    $bone = if ($m.Id -lt $donorBoneNames.Count) { $donorBoneNames[$m.Id] } else { '' }
     if ($m.Id -lt $donorBoneNames.Count) {
       $bone = $donorBoneNames[$m.Id]; $ci2 = [array]::IndexOf($carBoneNames, $bone)
       if ($ci2 -lt 0) { throw "$c has no bone $bone (the donor's lamp $($m.Path) hangs on it)" }
@@ -120,7 +124,7 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     $lamp = Match-Mesh $m.Path $targetModels   # (not $t: PowerShell names are case-insensitive, $T is the car's files)
     if (-not $lamp) { $lamp = ($targetModels | Where-Object { (Role $_).Kind -eq (Role $rel).Kind } | Select-Object -First 1) }
     if (-not $lamp) { throw "$c has no lamp model for the donor's $rel" }
-    $map += [pscustomobject]@{ Donor = $rel; Target = $lamp }
+    $map += [pscustomobject]@{ Donor = $rel; Target = $lamp; Bone = $bone }
     $m.Path = "game:\media\cars\$($c.ToLower())\" + $lamp.Replace('/', '\')
     Write-Host ("  lamp [{0,2}] {1,-44} -> {2}" -f $m.Id, ($rel -replace '^scene/exterior/', ''), ($lamp -replace '^scene/exterior/', ''))
   }
@@ -158,17 +162,34 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
         $dc = Center $donorLamp; $tc = Center $carLamp; $delta = @(($tc[0] - $dc[0]), ($tc[1] - $dc[1]), ($tc[2] - $dc[2])); $how = 'lamp'
       }
     }
-    if (-not $delta) {
-      $px = [BitConverter]::ToSingle($rest, $o + 12)
-      $bn = if ($px -lt 0) { 'boneheadlightl' } else { 'boneheadlightr' }
-      if ($pz -ge 0 -and $donorBones.ContainsKey($bn) -and $carBones.ContainsKey($bn)) {
-        $delta = @(($carBones[$bn][12] - $donorBones[$bn][12]), ($carBones[$bn][13] - $donorBones[$bn][13]), ($carBones[$bn][14] - $donorBones[$bn][14])); $how = 'headlight bone'
+    # pop-up lamps: lights are stored in the closed pose and the game turns them with the bone as it opens, so they
+    # are re-aimed from the donor's closed lens (centre + facing, from its normals) onto the car's closed lens
+    $frame = $null
+    if (-not $delta -and $mi -ge 0 -and $mi -lt $map.Count -and $map[$mi].Bone -like 'boneheadlight*' -and $donorBones.ContainsKey($map[$mi].Bone) -and $carBones.ContainsKey($map[$mi].Bone)) {
+      $bn = $map[$mi].Bone
+      $carModel = $map[$mi].Target
+      if ((Role $carModel).Part -ne 'glass') {   # no lens glass: the lens is part of the housing
+        $r0 = Role $carModel; $h = $targetModels | Where-Object { $x0 = Role $_; $x0.Kind -eq 'head' -and $x0.Side -eq $r0.Side -and $x0.Part -eq 'main' } | Sort-Object | Select-Object -First 1
+        if ($h) { $carModel = $h }
+      }
+      $dl = [LensFrame]::Of($D[$map[$mi].Donor]); $tl = [LensFrame]::Of($T[$carModel])
+      if ($dl -and $tl) {
+        $cd = [Quat]::Point($donorBones[$bn], @($dl[0], $dl[1], $dl[2])); $nd = [Quat]::Dir($donorBones[$bn], @($dl[3], $dl[4], $dl[5]))
+        $ct = [Quat]::Point($carBones[$bn], @($tl[0], $tl[1], $tl[2])); $nt = [Quat]::Dir($carBones[$bn], @($tl[3], $tl[4], $tl[5]))
+        $frame = @{ Cd = $cd; Ct = $ct; Q = [Quat]::Between($nd, $nt) }; $how = 'pop-up lens'
       }
     }
     foreach ($pose in 0, 32) {
       $p = $o + 12 + $pose
       $x = [BitConverter]::ToSingle($rest, $p); $y = [BitConverter]::ToSingle($rest, $p + 4); $z = [BitConverter]::ToSingle($rest, $p + 8)
       if ($delta) { $x += $delta[0]; $y += $delta[1]; $z += $delta[2] }
+      elseif ($frame) {
+        $v = [Quat]::Rotate($frame.Q, @(($x - $frame.Cd[0]), ($y - $frame.Cd[1]), ($z - $frame.Cd[2])))
+        $x = $frame.Ct[0] + $v[0]; $y = $frame.Ct[1] + $v[1]; $z = $frame.Ct[2] + $v[2]
+        $q = @(0..3 | ForEach-Object { [BitConverter]::ToSingle($rest, $p + 16 + 4 * $_) })
+        $q2 = [Quat]::Mul($frame.Q, [single[]]$q)
+        for ($k = 0; $k -lt 4; $k++) { [BitConverter]::GetBytes([single]$q2[$k]).CopyTo($rest, $p + 16 + 4 * $k) }
+      }
       else {
         # relative to the bumper at that end: x and y scaled to its size, z kept at the same distance from its outer face
         $B = if ($pz -ge 0) { $front } else { $rear }
@@ -189,6 +210,23 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   New-Item -ItemType Directory $dir -Force | Out-Null
   [IO.File]::WriteAllBytes((Join-Path $dir 'Lights.bin'), $lf.Write())
   [IO.File]::WriteAllBytes((Join-Path $dir 'LightPresets.bin'), $D['lightpresets.bin'])
+
+  if ($GraphFrom -and $GraphFrom[$ci]) {
+    # the graph names its animations (.\x.gr2) and bones (root_<bone>); the car must have all of them
+    $g = $GraphFrom[$ci]; $gz = Get-ChildItem $cars -Filter "$g.zip" | Select-Object -First 1; if (-not $gz) { throw "No car $g for -GraphFrom" }
+    $zz = [IO.Compression.ZipFile]::OpenRead($gz.FullName)
+    try { $ge = $zz.Entries | Where-Object { $_.FullName -ieq "Animations/$g.gsf" }; $ms = New-Object IO.MemoryStream; $st = $ge.Open(); $st.CopyTo($ms); $st.Close(); $graph = $ms.ToArray() } finally { $zz.Dispose() }
+    $txt = [Text.Encoding]::ASCII.GetString($graph)
+    $zz = [IO.Compression.ZipFile]::OpenRead($tz.FullName); try { $have = @($zz.Entries | ForEach-Object { $_.FullName.ToLower() }) } finally { $zz.Dispose() }
+    $missing = @([regex]::Matches($txt, '\.\\([A-Za-z0-9_]+\.gr2)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Where-Object { $have -notcontains "animations/$($_.ToLower())" })
+    if ($missing) { throw "$c can't use $g's animation graph; it lacks: $($missing -join ', ')" }
+    # bones it animates that the car lacks are skipped by the game (FM5's own Z06 graph names a boneGauges it doesn't have)
+    $noBone = @([regex]::Matches($txt, 'root_(bone[A-Za-z0-9_]+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique | Where-Object { $carBoneNames -notcontains $_.ToLower() })
+    if ($noBone) { Write-Warning "$c has no $($noBone -join ', ') for $g's animation graph; those animations won't show" }
+    New-Item -ItemType Directory (Join-Path $dir 'Animations') -Force | Out-Null
+    [IO.File]::WriteAllBytes((Join-Path $dir "Animations\$c.gsf"), $graph)
+    Write-Host "  animation graph from $g"
+  }
 }
 
 $env:FH2_MODS_ROOT = $ws

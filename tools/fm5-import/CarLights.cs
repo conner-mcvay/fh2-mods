@@ -55,6 +55,59 @@ public static class Skeleton {
   }
 }
 
+// Where a lamp's lens is and which way it faces, in the model's own space: centre of the lens vertices and their
+// average normal. Lens parts are those whose material path looks like glass/lens; a model without any uses all parts.
+public static class LensFrame {
+  public static float[] Of(byte[] model) {
+    var f = BurgFile.Read(model);
+    var mats = new Dictionary<int, string>();
+    foreach (var b in f.All("MatI")) { var m = System.Text.RegularExpressions.Regex.Match(Encoding.ASCII.GetString(b.Data), @"(?i)game:\\media\\[^\x00]+?\.materialbin"); if (b.Id.HasValue && m.Success) mats[b.Id.Value] = m.Value.ToLower(); }
+    var layouts = f.All("VLay").ToDictionary(b => b.Id.Value, b => VertexLayout.Parse(b.Data));
+    var buffers = f.All("VerB").ToDictionary(b => b.Id.Value, b => VertexBuffer.Parse(b.Data));
+    var meshes = f.All("Mesh").Select(MeshInfo.Parse).Where(m => m.Material != 0xFFFF).ToList();
+    Func<MeshInfo, bool> isLens = m => { string p; return mats.TryGetValue(m.Material, out p) && System.Text.RegularExpressions.Regex.IsMatch(Path.GetFileName(p), @"gls|glass|lens"); };
+    var use = meshes.Where(isLens).ToList(); if (use.Count == 0) use = meshes;
+    double[] c = new double[3], n = new double[3]; int count = 0;
+    foreach (var m in use) {
+      VertexLayout l; VertexBuffer pb, nb;
+      if (!layouts.TryGetValue(m.LayoutIndex, out l) || !buffers.TryGetValue(m.VbIndex[0], out pb) || !buffers.TryGetValue(m.VbIndex[1], out nb)) continue;
+      var pe = l.Elements.FirstOrDefault(e => e.Semantic == "POSITION" && e.Slot == 0);
+      var ne = l.Elements.FirstOrDefault(e => e.Semantic == "NORMAL" && e.Slot == 1);
+      if (pe == null || ne == null || pe.Format != 6 || ne.Format != 10) continue;
+      int poff = Offset(l, pe), noff = Offset(l, ne);
+      int p0 = m.VbOffset[0] / Math.Max(1, m.VbStride[0]), n0 = m.VbOffset[1] / Math.Max(1, m.VbStride[1]);
+      for (int i = 0; i < m.VertexCount; i++) {
+        int pp = (p0 + i) * pb.Stride + poff, np = (n0 + i) * nb.Stride + noff;
+        if (pp + 12 > pb.Bytes.Length || np + 8 > nb.Bytes.Length) break;
+        for (int k = 0; k < 3; k++) { c[k] += BitConverter.ToSingle(pb.Bytes, pp + 4 * k); n[k] += VertexMath.Half(BitConverter.ToUInt16(nb.Bytes, np + 2 * k)); }
+        count++;
+      }
+    }
+    if (count == 0) return null;
+    double len = Math.Sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]); if (len < 1e-6) len = 1;
+    return new[] { (float)(c[0] / count), (float)(c[1] / count), (float)(c[2] / count), (float)(n[0] / len), (float)(n[1] / len), (float)(n[2] / len) };
+  }
+  static int Offset(VertexLayout l, VertexElement x) { int o = 0; foreach (var e in l.Elements.Where(e => e.Slot == x.Slot)) { if (e == x) break; o += VertexLayout.FormatSize(e.Format); } return o; }
+}
+
+// Quaternions as x, y, z, w (the order Lights.bin stores them)
+public static class Quat {
+  public static float[] Mul(float[] a, float[] b) {   // a * b: rotate by b, then by a
+    return new[] { a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1], a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+                   a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2] };
+  }
+  public static float[] Between(float[] u, float[] v) {   // shortest rotation taking unit vector u to v
+    float d = u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+    if (d < -0.9999f) { var ax = Math.Abs(u[0]) < 0.9f ? new[] { 0f, -u[2], u[1] } : new[] { -u[1], u[0], 0f }; var l = (float)Math.Sqrt(ax[0] * ax[0] + ax[1] * ax[1] + ax[2] * ax[2]); return new[] { ax[0] / l, ax[1] / l, ax[2] / l, 0f }; }
+    var q = new[] { u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0], 1 + d };
+    var n = (float)Math.Sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]); return new[] { q[0] / n, q[1] / n, q[2] / n, q[3] / n };
+  }
+  public static float[] Rotate(float[] q, float[] v) { var r = Mul(Mul(q, new[] { v[0], v[1], v[2], 0f }), new[] { -q[0], -q[1], -q[2], q[3] }); return new[] { r[0], r[1], r[2] }; }
+  // a row-major 4x4 (row vectors, translation in the last row) applied to a point / a direction
+  public static float[] Point(float[] m, float[] p) { return new[] { p[0] * m[0] + p[1] * m[4] + p[2] * m[8] + m[12], p[0] * m[1] + p[1] * m[5] + p[2] * m[9] + m[13], p[0] * m[2] + p[1] * m[6] + p[2] * m[10] + m[14] }; }
+  public static float[] Dir(float[] m, float[] d) { var r = new[] { d[0] * m[0] + d[1] * m[4] + d[2] * m[8], d[0] * m[1] + d[1] * m[5] + d[2] * m[9], d[0] * m[2] + d[1] * m[6] + d[2] * m[10] }; var l = (float)Math.Sqrt(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]); return new[] { r[0] / l, r[1] / l, r[2] / l }; }
+}
+
 public static class ModelBounds {
   // min x,y,z, max x,y,z over every drawn mesh's positions (slot-0 stream), in the model's own space
   public static float[] Of(byte[] model) {
