@@ -48,13 +48,21 @@ To undo a layer, run the `Uninstall.ps1` inside its backup folder (right-click >
 
 Imports stack: run the importer again any time to add more cars; the cars you already imported stay.
 
+## Known bugs
+
+1. **Dirt mapping needs work**: dirt and grime don't build up on imported cars the way they do on FH2's own.
+2. **Lights may be slightly buggy**: night lights are transplanted from the light donor and fitted to the car, so glows can sit a little off, some lens glass glows warmer than it should, and some cars' pop-up headlights don't rise (see the guide for the fix that worked for the 2002 Trans Am).
+3. **Car names need work**: imported cars show a blank name in menus (FH2 has no text for them).
+4. **Autoshow thumbnails don't work**, but the car's thumbnail does show in your garage.
+
 ## Good to know
 
 - The importer edits the game's database, car and wheel archives, `zipmanifest.xml` and Azimuth's file index (`Mount\hash.manifest`), and patches `azimuth.exe` so it accepts the new index. Everything it changes is backed up first.
-- Imported car **names show blank** in menus (FH2 has no text for them).
 - Engine **sounds are borrowed** from the sound donor.
-- Night lights are transplanted from the light donor and fitted to the car; they are close but not always perfect. Some lens glass glows warmer than it should.
-- Some cars' pop-up headlights don't rise. See the guide for the fix that worked for the 2002 Trans Am.
 - Keep this folder: you need it to add more cars later. Your settings are remembered in `%LOCALAPPDATA%\fh2-mods\import-fm5-cars.json`.
+
+## License
+
+MIT (see `LICENSE`). Forza Horizon 2 and Forza Motorsport 5 are not included and belong to their owners; you need your own copies.
 
 The full walkthrough, advanced options (tuning lights, adding wheels for older imports, command-line use) and troubleshooting are in **[GUIDE.md](GUIDE.md)**.

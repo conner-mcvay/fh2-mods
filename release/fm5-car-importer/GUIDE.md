@@ -224,10 +224,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 
 ## 10. Known limitations
 
-- Imported cars have **no name** in menus.
+Known bugs:
+
+1. **Dirt mapping needs work**: dirt and grime don't build up on imported cars like on FH2's own.
+2. **Lights may be slightly buggy**: night lights are transplanted, close but not exact; some lens glass glows warmer than real; some pop-up headlights need the animation-graph fix (section 6).
+3. **Car names need work**: imported cars have no name in menus.
+4. **Autoshow thumbnails don't work**; the car's thumbnail does show in the garage.
+
+Other limitations:
+
 - Engine sounds are **borrowed** from an FH2 car.
-- Night lights are **transplanted**: close, not exact. Some lens glass glows warmer than real.
-- Some pop-up headlights need the animation-graph fix (section 6).
 - Wheel-shop thumbnails for imported wheels are blank.
 - Only FM5 1.0.0.20 and FH2 1.0.0.64 on Azimuth 0.9.7 are supported.
 - FM5-only interior or livery features that FH2 doesn't have aren't carried over.
@@ -236,7 +242,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 
 ```
 Import-Fm5Cars.cmd            double-click to import cars
-README.md, GUIDE.md, CHANGELOG.md
+README.md, GUIDE.md, CHANGELOG.md, LICENSE (MIT)
 tools\
   fm5-import\                 the importer
     Import-Fm5Cars.ps1          the questions and the whole run

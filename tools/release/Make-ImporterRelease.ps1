@@ -22,7 +22,7 @@ if (Test-Path $stage) { Remove-Item -Recurse -Force $stage }
 New-Item -ItemType Directory $stage | Out-Null
 
 $files = @(
-  'Import-Fm5Cars.cmd'
+  'Import-Fm5Cars.cmd', 'LICENSE'
   'tools\fm5-import\Import-Fm5Cars.ps1', 'tools\fm5-import\Export-Fm5Car.ps1', 'tools\fm5-import\Add-CarLights.ps1'
   'tools\fm5-import\Add-ImportedCarWheels.ps1', 'tools\fm5-import\WheelSwap.ps1', 'tools\fm5-import\CarLights.cs'
   'tools\fm5-import\ForzaModel.cs', 'tools\fm5-import\Fm5ModelConverter.cs'
