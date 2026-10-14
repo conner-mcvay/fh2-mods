@@ -4,3 +4,4 @@
 *.bak
 tools/bin/
 tools/weather-menu/*.exe
+__pycache__/

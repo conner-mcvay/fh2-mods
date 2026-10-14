@@ -11,7 +11,7 @@ Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.
 
 | Tool | Description |
 |---|---|
-| [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`) |
+| [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`). Release package: `tools\release\Make-ImporterRelease.ps1 -Version <x.y.z>`; user docs in `release/fm5-car-importer` |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
 
 ## Layout
