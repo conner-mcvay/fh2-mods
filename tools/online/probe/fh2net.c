@@ -125,6 +125,11 @@ static HRESULT STDMETHODCALLTYPE ns_GetInternetConnectionProfile(void *t, void *
 }
 static void *g_nsVtbl[] = { ns_QI, ns_AddRef, ns_Release, ns_3, ns_4, ns_5, ns_6, ns_GetInternetConnectionProfile, ns_8, ns_9, ns_10, ns_11, ns_12, ns_13 };
 
+static int wrap_qos(const wchar_t *cls, GUID *iid, void **out);   // qos.c
+static int wrap_json(const wchar_t *cls, GUID *iid, void **out);  // json.c
+static int wrap_streams(const wchar_t *cls, GUID *iid, void **out);  // proxy.c
+static int fix_streams(const wchar_t *cls, GUID *iid, void **out);   // streams.c
+
 // vccorlib110: ?GetActivationFactoryByPCWSTR@@YAJPEAXAEAVGuid@Platform@@PEAPEAX@Z (name, iid, out)
 typedef HRESULT (*GetAF_t)(void *, GUID *, void **);
 static GetAF_t o_GetAF;
@@ -141,6 +146,7 @@ static HRESULT h_GetAF(void *name, GUID *iid, void **out) {
     *out = w;
     logf("  wrapped NetworkInformation statics (level %d)", g_netLevel);
   }
+  if (SUCCEEDED(hr)) { wrap_qos(cls, iid, out); wrap_json(cls, iid, out); if (!fix_streams(cls, iid, out)) wrap_streams(cls, iid, out); }
   return hr;
 }
 
@@ -300,6 +306,8 @@ static BYTE *find_module(const char *exportName) {
   return NULL;
 }
 
+#include "trace.c"
+
 // A module's bound import, by name (to call Azimuth's own combase, whose HSTRINGs the game understands).
 static void *iat_lookup(BYTE *base, const char *dllName, const char *fnName) {
   IMAGE_NT_HEADERS64 *nt = (void *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
@@ -344,7 +352,7 @@ static void *g_resVtbl[] = { res_QI, prof_AddRef, prof_Release, prof_GetIids, pr
 static Obj g_result = { g_resVtbl };
 
 // The completed operation: IAsyncOperation<GetTokenAndSignatureResult^> at +0, IAsyncInfo at +8.
-typedef struct { void **vtbl; void **infoVtbl; LONG refs; Obj *handler; } TokenOp;
+typedef struct { void **vtbl; void **infoVtbl; LONG refs; Obj *handler; Obj *result; const char *what; } TokenOp;  // any completed operation
 static TokenOp *op_of_info(void *i) { return (TokenOp *)((BYTE *)i - 8); }
 static HRESULT STDMETHODCALLTYPE op_QI(void *t, const GUID *iid, void **out) {
   TokenOp *o = t;
@@ -366,7 +374,7 @@ static HRESULT STDMETHODCALLTYPE op_PutCompleted(void *t, Obj *h) {
   if (!h) return S_OK;
   VCALL(h, 1, ULONG (STDMETHODCALLTYPE *)(void *))(h);
   o->handler = h;
-  logf("token operation: completing");
+  logf("%s operation: completing", o->what);
   return VCALL(h, 3, HRESULT (STDMETHODCALLTYPE *)(void *, void *, int))(h, o, 1 /* Completed */);
 }
 static HRESULT STDMETHODCALLTYPE op_GetCompleted(void *t, Obj **h) {
@@ -374,7 +382,11 @@ static HRESULT STDMETHODCALLTYPE op_GetCompleted(void *t, Obj **h) {
   if (o->handler) VCALL(o->handler, 1, ULONG (STDMETHODCALLTYPE *)(void *))(o->handler);
   return S_OK;
 }
-static HRESULT STDMETHODCALLTYPE op_GetResults(void *t, Obj **r) { (void)t; *r = &g_result; logf("token operation: results taken"); return S_OK; }
+static HRESULT STDMETHODCALLTYPE op_GetResults(void *t, Obj **r) {
+  TokenOp *o = t; *r = o->result;
+  VCALL(o->result, 1, ULONG (STDMETHODCALLTYPE *)(void *))(o->result);
+  logf("%s operation: results taken", o->what); return S_OK;
+}
 static void *g_opVtbl[] = { op_QI, op_AddRef, op_Release, prof_GetIids, prof_GetRuntimeClassName, prof_GetTrustLevel,
   op_PutCompleted, op_GetCompleted, op_GetResults };
 
@@ -391,7 +403,7 @@ static void *g_infVtbl[] = { inf_QI, inf_AddRef, inf_Release, prof_GetIids, prof
 static HRESULT token_op(const char *who, void *method, void *url, void **out) {
   logf("%s %ls %ls -> fake token", who, hs(method), hs(url));
   TokenOp *o = HeapAlloc(GetProcessHeap(), 0, sizeof *o);
-  o->vtbl = g_opVtbl; o->infoVtbl = g_infVtbl; o->refs = 1; o->handler = NULL;
+  o->vtbl = g_opVtbl; o->infoVtbl = g_infVtbl; o->refs = 1; o->handler = NULL; o->result = &g_result; o->what = "token";
   *out = o;
   return S_OK;
 }
@@ -402,6 +414,11 @@ static HRESULT STDMETHODCALLTYPE u_tokBuf(void *t, void *m, void *u, void *h, vo
 static HRESULT STDMETHODCALLTYPE s_tok(void *t, void *m, void *u, void *h, void **out) { (void)t; (void)h; return token_op("User.GetTokenAndSignatureForAllUsersAsync", m, u, out); }
 static HRESULT STDMETHODCALLTYPE s_tokArr(void *t, void *m, void *u, void *h, UINT32 n, void *b, void **out) { (void)t; (void)h; (void)n; (void)b; return token_op("User.GetTokenAndSignatureForAllUsersAsync(body)", m, u, out); }
 static HRESULT STDMETHODCALLTYPE s_tokBuf(void *t, void *m, void *u, void *h, void *b, void **out) { (void)t; (void)h; (void)b; return token_op("User.GetTokenAndSignatureForAllUsersAsync(buffer)", m, u, out); }
+
+#include "qos.c"
+#include "json.c"
+#include "proxy.c"
+#include "streams.c"
 
 // Azimuth 0.9.7's vtables (RVAs in azimuth.exe), checked slot by slot before patching.
 typedef struct { DWORD table; int slot; DWORD expect; void *fn; } VtPatch;
@@ -439,12 +456,13 @@ static DWORD WINAPI worker(LPVOID p) {
     Sleep(1);
   }
   if (g_fakeToken) install_token_hooks();
+  trace_install(L"Game", GAME_BASE, 0x140000000ULL, "game");
   xhr_init();
   for (i = 0; i < 6000; i++) {     // up to ~10 minutes at 100 ms
     BYTE *x = find_module("Microsoft.Xbox.Services.dll");
     if (x) {
       int n = patch_iat(x, "xsapi");
-      if (n >= 0) { logf("Microsoft.Xbox.Services.dll at %p; %d hooks installed", x, n); break; }
+      if (n >= 0) { logf("Microsoft.Xbox.Services.dll at %p; %d hooks installed", x, n); trace_install(L"Xsapi", x, 0x180000000ULL, "xsapi"); break; }
     }
     Sleep(100);
   }
@@ -470,7 +488,12 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   g_fakeToken = GetPrivateProfileIntW(L"xbl", L"FakeToken", 0, g_ini);
   GetPrivateProfileStringW(L"xbl", L"Token", L"XBL3.0 x=1234567890;fh2net", g_token, 512, g_ini);
   GetPrivateProfileStringW(L"http", L"Server", L"", g_httpServer, 256, g_ini);
-  logf("settings: ConnectivityLevel=%d FakeToken=%d Server=%ls", g_netLevel, g_fakeToken, g_httpServer);
+  g_fakeQos = GetPrivateProfileIntW(L"net", L"FakeQos", 0, g_ini);
+  g_debugJson = GetPrivateProfileIntW(L"debug", L"Json", 0, g_ini);
+  g_debugStreams = GetPrivateProfileIntW(L"debug", L"Streams", 0, g_ini);
+  g_fixStreams = GetPrivateProfileIntW(L"net", L"FixStreams", 0, g_ini);
+  GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);
+  logf("settings: ConnectivityLevel=%d FakeToken=%d FakeQos=%d FixStreams=%d Server=%ls", g_netLevel, g_fakeToken, g_fakeQos, g_fixStreams, g_httpServer);
   // The forwarded exports resolve against this module once it is loaded under its own name.
   HMODULE nx = LoadLibraryW(next);
   logf("azimuth-tls-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());

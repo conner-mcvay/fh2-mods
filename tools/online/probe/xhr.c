@@ -98,9 +98,10 @@ static ULONG STDMETHODCALLTYPE ls_Release(IStream *t) {
 }
 static HRESULT STDMETHODCALLTYPE ls_Read(IStream *t, void *buf, ULONG cb, ULONG *got) {
   ULONG g = 0; HRESULT hr = LS(t)->in->lpVtbl->Read(LS(t)->in, buf, cb, &g);
-  // A short read is the end of the response: say so with S_FALSE, as the system's response stream does;
-  // the Xls client reads until it sees that (an HGlobal stream's S_OK made it grow its buffer forever).
-  if (SUCCEEDED(hr) && g < cb) hr = S_FALSE;
+  // As the system's response stream: S_OK while data comes, S_FALSE once there is none left. The Xls client
+  // reads until S_FALSE (an HGlobal stream's endless S_OK made it grow its buffer forever); the Xbox Live
+  // library drops the bytes of a read that answers S_FALSE, so S_FALSE must not come with data.
+  if (SUCCEEDED(hr)) hr = (g == 0 && cb) ? S_FALSE : S_OK;
   if (g || LS(t)->emptyReads++ < 3) {
     char hex[3 * 16 + 1] = ""; for (ULONG i = 0; i < g && i < 16; i++) sprintf(hex + 3 * i, "%02x ", ((BYTE *)buf)[i]);
     logf("http #%ld stream read at %lu: asked %lu, got %lu (hr 0x%08lx) %s", LS(t)->id, LS(t)->pos, cb, g, hr, hex);
@@ -209,7 +210,10 @@ static HRESULT STDMETHODCALLTYPE x_Abort(Xhr *x) { x->aborted = 1; return S_OK; 
 static HRESULT STDMETHODCALLTYPE x_SetCookie(Xhr *x, const void *c, DWORD *st) { (void)x; (void)c; if (st) *st = 0; return S_OK; }
 static HRESULT STDMETHODCALLTYPE x_SetCustomResponseStream(Xhr *x, void *s) { logf("http #%ld SetCustomResponseStream (ignored)", x->id); (void)s; return S_OK; }
 static HRESULT STDMETHODCALLTYPE x_SetProperty(Xhr *x, int prop, ULONGLONG v) { (void)x; (void)prop; (void)v; return S_OK; }
-static HRESULT STDMETHODCALLTYPE x_GetAllResponseHeaders(Xhr *x, wchar_t **out) { *out = game_wstr(x->respHeaders ? x->respHeaders : L""); return *out ? S_OK : E_OUTOFMEMORY; }
+static HRESULT STDMETHODCALLTYPE x_GetAllResponseHeaders(Xhr *x, wchar_t **out) {
+  logf("http #%ld GetAllResponseHeaders", x->id);
+  *out = game_wstr(x->respHeaders ? x->respHeaders : L""); return *out ? S_OK : E_OUTOFMEMORY;
+}
 static HRESULT STDMETHODCALLTYPE x_GetCookie(Xhr *x, const wchar_t *u, const wchar_t *n, DWORD f, DWORD *count, void **c) { (void)x; (void)u; (void)n; (void)f; *count = 0; *c = NULL; return S_OK; }
 static HRESULT STDMETHODCALLTYPE x_GetResponseHeader(Xhr *x, const wchar_t *name, wchar_t **out) {
   *out = NULL;
@@ -220,10 +224,12 @@ static HRESULT STDMETHODCALLTYPE x_GetResponseHeader(Xhr *x, const wchar_t *name
       const wchar_t *v = l + n + 1; while (*v == L' ') v++;
       wchar_t tmp[2048]; size_t len = (size_t)(e - v) < 2047 ? (size_t)(e - v) : 2047;
       memcpy(tmp, v, len * sizeof(wchar_t)); tmp[len] = 0;
+      logf("http #%ld GetResponseHeader(%ls) -> %ls", x->id, name, tmp);
       *out = game_wstr(tmp); return *out ? S_OK : E_OUTOFMEMORY;
     }
     l = *e ? e + 2 : e;
   }
+  logf("http #%ld GetResponseHeader(%ls) -> not found", x->id, name);
   return HRESULT_FROM_WIN32(ERROR_WINHTTP_HEADER_NOT_FOUND);
 }
 static void *g_xhrVtbl[] = { x_QI, x_AddRef, x_Release, x_Open, x_Send, x_Abort, x_SetCookie, x_SetCustomResponseStream,

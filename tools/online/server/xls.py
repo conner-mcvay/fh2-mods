@@ -45,9 +45,26 @@ class Schema:
         return t
 
     def find(self, name):
-        so = self.d.find(b'\0' + name.encode() + b'\0') + 1; sva = B + self.pe.get_rva_from_offset(so)
+        """The type descriptor named `name`, or None."""
+        so = self.d.find(b'\0' + name.encode() + b'\0')
+        if so < 0: return None
+        sva = B + self.pe.get_rva_from_offset(so + 1)
         i = self.d.find(struct.pack('<Q', sva))
-        return self.desc(B + self.pe.get_rva_from_offset(i) - 8)
+        if i < 0: return None
+        t = self.desc(B + self.pe.get_rva_from_offset(i) - 8)
+        return t if t['name'] == name else None
+
+    def call_types(self, class_name, method):
+        """(parameters type, results type) of an LSP call, by Turn 10's naming: Forza<Class><Method>_Parameters
+        (also ForzaWebServices..., Xls..., or bare <Class><Method>). Either may be None."""
+        cls = class_name.split(',')[0].split('.')[-1]
+        out = []
+        for suffix in ('_Parameters', '_Results'):
+            for prefix in ('Forza', 'ForzaWebServices', 'Xls', ''):
+                t = self.find(f'{prefix}{cls}{method}{suffix}')
+                if t: break
+            out.append(t)
+        return tuple(out)
 
 
 FIXED = {0x0: '>B', 0x1: '>H', 0x2: '>H', 0x3: '>I', 0x4: '>i', 0x5: '>Q', 0x6: '>Q', 0x13: '>Q', 0x7: '>f', 0x11: '>?', 0x12: '16s'}
