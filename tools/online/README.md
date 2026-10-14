@@ -1,4 +1,4 @@
-# Online research: private servers for FH2 on Azimuth
+﻿# Online research: private servers for FH2 on Azimuth
 
 Goal: get FH2 (1.0.0.64, Azimuth 0.9.7) out of offline-only mode and talking to a server we run, to work toward private multiplayer. Nothing here contacts Microsoft or Turn 10; their services are gone, and everything goes to our own server.
 
@@ -47,6 +47,20 @@ With all three settings on, at boot and in free roam:
 - Xbox Live (from `Microsoft.Xbox.Services.dll`; documented REST APIs): `userpresence` (POST presence), `profile` (GET settings), `sessiondirectory` (GET sessions for service config `788f0100-a4bc-46c3-b19b-d1001a96545b`), `achievements`, `music`, `gameserverds` (POST variants for title `1368890819`), and a `wss://rta.xboxlive.com/connect` web socket (not redirected yet).
 - The game reads `game:\Media\NerdConfig.ini` (not shipped); unexplored.
 - The LSP client's endpoint comes from a config section `HttpProtocolFactory` (`url`, `port`, `UseHTTPS`; `141B7C0E0`), and there is a `TestLspProvider` (`unsecureAddress`, `testwebh.forzamotorsport.net`).
+
+## Logon works (2026-10-14)
+
+With `server/fh2srv.py` answering `Forza.WebServices.User.Logon`, the game counts as connected to Turn 10's services and its online menus unlock.
+
+- Message schemas come from the game's own reflection descriptors (`tools/re/xlstypes.py` dumps them; `server/xls.py` encodes and decodes with them, reading the user's exe). Wire format: big-endian; u32-length strings and blobs; u32-count arrays; structs in field order; DateTime as an ISO 8601 string (an empty one is an error); see `xls.py`.
+- Reply body: `WEB_RESPONSE_HEADER` (`Result`, `ErrorCode`, `DataLength`: u32 each; `Result` 0 = success, 2 = error with an `ErrorCode` and a `DataLength`-byte message), then the `<Call>_Results` struct. Parsed by `140EFC9E0` / `140EFCCA0`; fields by `140EE5880`.
+- The client reads a reply until the stream returns `S_FALSE` (fh2net's response stream does that on a short read).
+
+After Logon the game calls: `Xls.WebServices.User.GetUserData`, `Storefront.GetFileKeywords` / `GetFeaturedLiveriesForRandomCars`, `CarClub.GetClubKeywords` / `GetRecommendedClubs`, `User.GetOwnedProducts` / `GetEconomySettings` / `GetCompareStatsForRelatedUsers`, `Drivatar.GetDrivatarsForCache`, `DailyCreditBonus.GetPayout`, `OnlineProfile.UpdateAllTables` / `UpdateAll` (all unanswered so far).
+
+## Online free roam uses dedicated servers
+
+Starting a private free roam session calls Xbox Live's game server discovery (`POST gameserverds.xboxlive.com/titles/1368890819/variants`, body `{"locale":"en-us","maxVariants":8,"publisherOnly":false}`); unanswered, the game says it can't reach the Live configuration servers. The game then allocates a cluster (`AllocateClusterAsync` on `gameserverms.xboxlive.com`, `IDS_MultiplayerStatus_AllocatingCluster`) and connects to the server it gets (`[SecureIPResolver][CreateGameServerAssociation]`). These were Turn 10's servers on Xbox Live Compute; their program was never public. The client's replication code has server roles (`m_pManager->IsServer()`, `IsServerOwned`, `SessionHost`), which is worth reading before deciding how to stand in for the server.
 
 ## Next
 

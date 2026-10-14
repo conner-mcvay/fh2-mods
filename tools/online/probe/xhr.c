@@ -79,6 +79,59 @@ static void fail(Xhr *x, HRESULT hr, const char *what) {
   if (x->callback && !x->aborted) XCALL(x->callback, 8, HRESULT (STDMETHODCALLTYPE *)(void *, void *, HRESULT))(x->callback, x, hr);
 }
 
+// The response stream handed to the game: an HGlobal stream, wrapped to log every read and seek the
+// game makes (how the Xls client walks a reply).
+typedef struct { IStreamVtbl *vtbl; LONG refs; IStream *in; LONG id; ULONG pos; int emptyReads; } LogStream;
+#define LS(t) ((LogStream *)(t))
+static HRESULT STDMETHODCALLTYPE ls_QI(IStream *t, REFIID iid, void **out) {
+  static const GUID IID_ISeqStream = { 0x0c733a30, 0x2a1c, 0x11ce, { 0xad, 0xe5, 0x00, 0xaa, 0x00, 0x44, 0x77, 0x3d } };
+  static const GUID IID_IStream_ = { 0x0000000c, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } };
+  if (IsEqualGUID(iid, &IID_IUnknown_x) || IsEqualGUID(iid, &IID_ISeqStream) || IsEqualGUID(iid, &IID_IStream_)) { InterlockedIncrement(&LS(t)->refs); *out = t; return S_OK; }
+  char b[40]; guidstr(iid, b); logf("http #%ld stream QI {%s}: no", LS(t)->id, b);
+  *out = NULL; return E_NOINTERFACE;
+}
+static ULONG STDMETHODCALLTYPE ls_AddRef(IStream *t) { return InterlockedIncrement(&LS(t)->refs); }
+static ULONG STDMETHODCALLTYPE ls_Release(IStream *t) {
+  LONG r = InterlockedDecrement(&LS(t)->refs);
+  if (!r) { LS(t)->in->lpVtbl->Release(LS(t)->in); xfree(t); }
+  return r;
+}
+static HRESULT STDMETHODCALLTYPE ls_Read(IStream *t, void *buf, ULONG cb, ULONG *got) {
+  ULONG g = 0; HRESULT hr = LS(t)->in->lpVtbl->Read(LS(t)->in, buf, cb, &g);
+  // A short read is the end of the response: say so with S_FALSE, as the system's response stream does;
+  // the Xls client reads until it sees that (an HGlobal stream's S_OK made it grow its buffer forever).
+  if (SUCCEEDED(hr) && g < cb) hr = S_FALSE;
+  if (g || LS(t)->emptyReads++ < 3) {
+    char hex[3 * 16 + 1] = ""; for (ULONG i = 0; i < g && i < 16; i++) sprintf(hex + 3 * i, "%02x ", ((BYTE *)buf)[i]);
+    logf("http #%ld stream read at %lu: asked %lu, got %lu (hr 0x%08lx) %s", LS(t)->id, LS(t)->pos, cb, g, hr, hex);
+  }
+  LS(t)->pos += g; if (got) *got = g;
+  return hr;
+}
+static HRESULT STDMETHODCALLTYPE ls_Write(IStream *t, const void *b, ULONG cb, ULONG *w) { return LS(t)->in->lpVtbl->Write(LS(t)->in, b, cb, w); }
+static HRESULT STDMETHODCALLTYPE ls_Seek(IStream *t, LARGE_INTEGER d, DWORD o, ULARGE_INTEGER *np) {
+  ULARGE_INTEGER p; HRESULT hr = LS(t)->in->lpVtbl->Seek(LS(t)->in, d, o, &p);
+  logf("http #%ld stream seek %lld from %lu -> %llu", LS(t)->id, d.QuadPart, o, p.QuadPart);
+  LS(t)->pos = (ULONG)p.QuadPart; if (np) *np = p;
+  return hr;
+}
+static HRESULT STDMETHODCALLTYPE ls_SetSize(IStream *t, ULARGE_INTEGER n) { return LS(t)->in->lpVtbl->SetSize(LS(t)->in, n); }
+static HRESULT STDMETHODCALLTYPE ls_CopyTo(IStream *t, IStream *s, ULARGE_INTEGER n, ULARGE_INTEGER *r, ULARGE_INTEGER *w) {
+  logf("http #%ld stream CopyTo %llu", LS(t)->id, n.QuadPart); return LS(t)->in->lpVtbl->CopyTo(LS(t)->in, s, n, r, w);
+}
+static HRESULT STDMETHODCALLTYPE ls_Commit(IStream *t, DWORD f) { return LS(t)->in->lpVtbl->Commit(LS(t)->in, f); }
+static HRESULT STDMETHODCALLTYPE ls_Revert(IStream *t) { return LS(t)->in->lpVtbl->Revert(LS(t)->in); }
+static HRESULT STDMETHODCALLTYPE ls_Lock(IStream *t, ULARGE_INTEGER a, ULARGE_INTEGER b, DWORD c) { (void)t; (void)a; (void)b; (void)c; return STG_E_INVALIDFUNCTION; }
+static HRESULT STDMETHODCALLTYPE ls_Stat(IStream *t, STATSTG *s, DWORD f) { logf("http #%ld stream Stat", LS(t)->id); return LS(t)->in->lpVtbl->Stat(LS(t)->in, s, f | STATFLAG_NONAME); }
+static HRESULT STDMETHODCALLTYPE ls_Clone(IStream *t, IStream **o) { logf("http #%ld stream Clone (refused)", LS(t)->id); *o = NULL; return E_NOTIMPL; }
+static IStreamVtbl g_lsVtbl = { ls_QI, ls_AddRef, ls_Release, ls_Read, ls_Write, ls_Seek, ls_SetSize, ls_CopyTo, ls_Commit, ls_Revert, ls_Lock, ls_Lock, ls_Stat, ls_Clone };
+
+static IStream *log_stream(IStream *in, LONG id) {
+  LogStream *s = HeapAlloc(GetProcessHeap(), 0, sizeof *s);
+  s->vtbl = &g_lsVtbl; s->refs = 1; s->in = in; s->id = id; s->pos = 0; s->emptyReads = 0;
+  return (IStream *)s;
+}
+
 static DWORD WINAPI x_run(LPVOID param) {
   Xhr *x = param;
   URL_COMPONENTS uc = { sizeof uc };
@@ -119,9 +172,12 @@ static DWORD WINAPI x_run(LPVOID param) {
     ULONG w; s->lpVtbl->Write(s, buf, got, &w); total += got;
   }
   LARGE_INTEGER zero = { 0 }; s->lpVtbl->Seek(s, zero, STREAM_SEEK_SET, NULL);
+  s = log_stream(s, x->id);
   logf("http #%ld %ls %ls -> %lu, %lu bytes", x->id, x->method, x->url, st, total);
   if (!x->aborted && x->callback) {
+    // OnHeadersAvailable, OnDataAvailable (the Xls client keeps this stream), OnResponseReceived (it only signals)
     XCALL(x->callback, 4, HRESULT (STDMETHODCALLTYPE *)(void *, void *, DWORD, const wchar_t *))(x->callback, x, st, stText);
+    if (!x->aborted) XCALL(x->callback, 5, HRESULT (STDMETHODCALLTYPE *)(void *, void *, void *))(x->callback, x, s);
     if (!x->aborted) XCALL(x->callback, 6, HRESULT (STDMETHODCALLTYPE *)(void *, void *, void *))(x->callback, x, s);
   }
   s->lpVtbl->Release(s);
