@@ -2,6 +2,7 @@
   re.py xref <string> [...]      code that loads the address of an ASCII string (lea/mov rip-relative)
   re.py dis <va> [count] [back]  disassemble from va (hex), optionally starting `back` bytes earlier
   re.py func <va>                disassemble the whole function containing va (via .pdata)
+  re.py calls <va> [...]         direct call/jmp rel32 sites targeting va
 """
 import sys, re, struct, pefile, capstone
 
@@ -44,6 +45,19 @@ def xref(s):
         p = m.start(); disp = struct.unpack_from('<i', seg, p + 3)[0]
         if tv + p + 7 + disp == target: print(f'  {tv + p:X}')
 
+def calls(target):
+    """Direct calls/jumps (E8/E9 rel32) to target."""
+    t0, t1 = text.PointerToRawData, text.PointerToRawData + text.SizeOfRawData
+    tv = BASE + text.VirtualAddress
+    seg = data[t0:t1]
+    print(f'=== calls to {target:X}')
+    for op in (b'\xe8', b'\xe9'):
+        p = seg.find(op)
+        while p >= 0:
+            if p + 5 <= len(seg) and tv + p + 5 + struct.unpack_from('<i', seg, p + 1)[0] == target:
+                f, _ = func_of(tv + p); print(f'  {tv + p:X} {"call" if op == b"\xe8" else "jmp "} (in {f:X})')
+            p = seg.find(op, p + 1)
+
 def func_of(va):
     rva = va - BASE
     for e in pe.DIRECTORY_ENTRY_EXCEPTION:
@@ -62,6 +76,8 @@ if __name__ == '__main__':
         for s in sys.argv[2:]: xref(s)
     elif cmd == 'dis':
         dis(int(sys.argv[2], 16), int(sys.argv[3]) if len(sys.argv) > 3 else 40, int(sys.argv[4], 16) if len(sys.argv) > 4 else 0)
+    elif cmd == 'calls':
+        for a in sys.argv[2:]: calls(int(a, 16))
     elif cmd == 'func':
         b, e = func_of(int(sys.argv[2], 16)); print(f'function {b:X}..{e:X}')
         o = off_of(b - BASE)
