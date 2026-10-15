@@ -35,7 +35,18 @@ static void xuid_patch(void) {
   logf("xuid %llu", x);
 }
 
+// [net] SkipTrafficWait=1: the initial car loading (stateflow network.xml initial_car_loading) waits in
+// NetworkWaitForAllPendingTraffic (update 1408E05E0) while the traffic manager's pending flag (+0xAE) is set -
+// traffic Turn 10's server ran and fh2srv doesn't - and only after it are the players' cars unghosted
+// (NetworkInitialCarLoadingUnghosted), so without this players drive through each other. The patch drops the
+// jne at 1408E0658, so the wait is done at once (online traffic stays empty).
+static int g_skipTrafficWait;
+
 static void game_patches(void) {
+  if (g_skipTrafficWait) {
+    static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
+    patch_bytes(GAME_BASE + (0x1408E0658 - 0x140000000ULL), orig, nops, 2, "SkipTrafficWait");
+  }
   if (g_skipWeatherWait) {
     static const BYTE orig[] = { 0x48, 0x8B, 0x0D }, jmp[] = { 0xEB, 0x48 };   // mov rcx, [rip+..] -> jmp 140964234
     patch_bytes(GAME_BASE + (0x1409641EA - 0x140000000ULL), orig, jmp, 2, "SkipWeatherWait");
