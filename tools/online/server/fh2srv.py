@@ -5,7 +5,7 @@ gets 503.
 
   py -3 -I fh2srv.py --game <FH2 game folder> [--host 0.0.0.0] [--port 8090] [--out <folder>]
 """
-import argparse, datetime, hashlib, http.server, json, os, struct, sys, threading, time, uuid
+import argparse, datetime, hashlib, http.server, json, os, random, struct, sys, threading, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import relay, xls
@@ -145,13 +145,100 @@ LSP = {
 }
 
 
+def load_drivatar_cache():
+    r"""The game's offline drivatars, media\drivatarglobalcache\DefaultCache.bin (Mount\mediapc first): u32
+    version 4, u32 count, then count records of 9816 bytes - DrivatarRacingInfo as the game stores the ones it gets
+    from GetDrivatarsForCache (it writes them in the same format to its
+    Turn10Temp.scratch\DrivatarGlobalCache\DownloadCache.bin). Per record: GamerTag (UTF-16, 16 chars) at 0, Xuid (u64) at 0x28 (0 for all of these),
+    CarId/LiveryId/TuneId at 0x30/0x38/0x40 (-1: none), segment slots from 0x48, UserSkillLevel (u32) at 0x2648,
+    wristbandLevel at 0x264C (XP-sized: 46000..1850000; the drivatar's level follows it)."""
+    mount = os.path.join(os.path.dirname(os.path.dirname(exe)), 'Mount')
+    for media in ('mediapc', 'media'):
+        p = os.path.join(mount, media, 'drivatarglobalcache', 'DefaultCache.bin')
+        if os.path.isfile(p): break
+    else:
+        print('no drivatarglobalcache\\DefaultCache.bin; drivatars get no names', flush=True)
+        return []
+    d = open(p, 'rb').read()
+    ver, n = struct.unpack_from('<II', d, 0)
+    if ver != 4 or 8 + 9816 * n != len(d):
+        print(f'unexpected {p} (version {ver}, {n} records, {len(d)} bytes); drivatars get no names', flush=True)
+        return []
+    out = []
+    for i in range(n):
+        r = d[8 + 9816 * i:8 + 9816 * (i + 1)]
+        out.append({'GamerTag': r[:32].decode('utf-16le').split('\0')[0], 'IsFriend': False,
+                    'Xuid': struct.unpack_from('<Q', r, 0x28)[0], 'CarId': struct.unpack_from('<I', r, 0x30)[0],
+                    'LiveryId': struct.unpack_from('<Q', r, 0x38)[0], 'TuneId': struct.unpack_from('<Q', r, 0x40)[0],
+                    'UserSkillLevel': struct.unpack_from('<I', r, 0x2648)[0],
+                    'wristbandLevel': struct.unpack_from('<i', r, 0x264C)[0]})
+    return out
+
+
+DRIVATARS = load_drivatar_cache()
+
+
+def drivatars_for_cache(params, ctx):
+    """The drivatars the game keeps for single player: its own offline ones, as they are. Answering an empty list
+    left drivatars nameless (DriverXXX); an error left none at all. A Xuid other than the file's 0 also shows as
+    "Driver NNNN", and a small wristbandLevel as level 1."""
+    want = params.get('numberOfDrivatars') or len(DRIVATARS)
+    return lsp_reply('ForzaWebServicesDrivatarGetDrivatarsForCache_Results', {'drivatarInfos': DRIVATARS[:want]})
+
+
+LSP[('Forza.WebServices.Drivatar, Forza.WebServices', 'GetDrivatarsForCache')] = \
+    ('ForzaWebServicesDrivatarGetDrivatarsForCache_Parameters', drivatars_for_cache)
+
+
+def drivatars_for_race(params, ctx):
+    """Drivatars for a race or free roam (bucketId 0): numberOfDrivatars of the offline ones, different names,
+    in the asked bucket; the game picks their cars (CarId -1, as in its own cache)."""
+    want = params.get('numberOfDrivatars') or 0
+    seen, pick = set(), []
+    for i in random.sample(range(len(DRIVATARS)), len(DRIVATARS)):
+        if DRIVATARS[i]['GamerTag'] not in seen: seen.add(DRIVATARS[i]['GamerTag']); pick.append(i)
+        if len(pick) == want: break
+    infos = [dict(DRIVATARS[i], BucketId=params.get('bucketId', 0)) for i in pick]
+    return lsp_reply('ForzaWebServicesDrivatarGetDrivatarInformationForRace_Results', {'drivatarInfos': infos})
+
+
+LSP[('Forza.WebServices.Drivatar, Forza.WebServices', 'GetDrivatarInformationForRace')] = \
+    ('ForzaWebServicesDrivatarGetDrivatarInformationForRace_Parameters', drivatars_for_race)
+
+
+def economy_settings(params, ctx):
+    """The game's own built-in economy values (what a profile that never got server values saves in its
+    ForzaEconomyState). The game stores whatever this returns in the save, so zeros here zero every race reward
+    from then on, offline too."""
+    return lsp_reply('ForzaUserGetEconomySettings_Results', {'settings': {
+        'creditDestinationBonus': 30000, 'creditDestinationFalloff': 2000,
+        'xpPerKmOffline': 800, 'xpPerKmOnline': 640, 'creditPerKm': 960, 'minimumFinishLineXp': 0,
+        'tombolaPrizeScale': 1.0, 'promoBonusScale': 1.0, 'wagerRaceCost': 0,
+        'enableTokens': False, 'enableXboxMusic': False}})
+
+
+LSP[('Forza.WebServices.User, Forza.WebServices', 'GetEconomySettings')] = (None, economy_settings)
+
+
+# Calls answered with an error, as when Turn 10's servers were down, so the game keeps its own values instead
+# of taking defaults from a success (online credits: 0).
+LSP_UNAVAILABLE = {
+    ('Forza.WebServices.User, Forza.WebServices', 'RetrieveOnlineCredits'),
+}
+
+
 def lsp_default(class_name, method, body, rec):
-    """Any other LSP call: success, with its _Results type (if it has one) filled with defaults."""
+    """Any other LSP call: success, with its _Results type (if it has one) filled with defaults - or, for
+    LSP_UNAVAILABLE, an error (Result 2, ErrorCode, DataLength-byte message)."""
     ptype, rtype = schema.call_types(class_name, method)
     if ptype and body:
         try: rec['lsp_params'], _ = xls.decode(ptype, body)
         except Exception as e: rec['lsp_params_error'] = repr(e)
     rec['lsp_types'] = [ptype and ptype['name'], rtype and rtype['name']]
+    if (class_name, method) in LSP_UNAVAILABLE:
+        msg = b'service unavailable'
+        rec['lsp_unavailable'] = True
+        return struct.pack('>III', 2, 1, len(msg)) + msg
     data = xls.encode(rtype, None) if rtype else b''
     return struct.pack('>III', 0, 0, len(data)) + data
 
@@ -344,7 +431,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if call in LSP:
             ptype, fn = LSP[call]
             try:
-                params, end = xls.decode(schema.find(ptype), body)
+                params, end = xls.decode(schema.find(ptype), body) if ptype else ({}, 0)
                 rec['lsp_params'] = params
                 ctx = {'body': body, 'end': end, 'xuid': self.headers.get('X-Fh2net-Xuid', DEFAULT_XUID)}
                 reply, status, ctype = fn(params, ctx), 200, 'bin/xtsw'
