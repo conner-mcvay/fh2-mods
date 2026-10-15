@@ -89,7 +89,20 @@ With `FakeAssociation=1`, the game sends to `[::1]:5101` (recorded in `captures/
 0000 feff 00000000 01 33 0000 109ba1a1981a1923221023b6b0b339b4 3438 00..00 1200 0400 00..00 0200 00000000
 ```
 
+That is NerdCore (`Engine\NetV2\NerdCore`), the game's own UDP transport; `server/nerd.py` reads and writes it (format notes at its top, with the functions they come from). In short: an 11-byte header (id, ack, ack bits, message count, size), then bit-packed messages, LSB first, with no length between them; message ids are 7 bits. The client contains the server's side of the handshake too (`141765B30`), which is how its replies were worked out.
+
+## Connected (2026-10-15)
+
+`fh2srv.py` now plays the server's side: OpenConnection (version `6CC152FD`, game `Flagship`, the user id) is answered with OpenConnectionResponse Ok echoing the client's attempt; the client's ResponseAck gets TimeSync and ConnectionSyncDone; Pings get Pongs; every sequenced packet is acked. The client then stays connected (pings every second, nothing resent) and sends one packet of game messages, starting with ObjectCreate (its own objects). The game shows "FREEROAM SESSION - Joining Session..." and stays there: it waits for the server's side of the world.
+
+The message table (`142F4DB20`, 77 entries) shows what that server did: object replication (ObjectCreate/Update/Delete, ownership requests, grants and transfers), traffic it simulated (ServerTrafficFullSync, ...RouteProgressUpdate, ...FullRoute), collisions, weather, car meets, races and Road Trips. Game messages carry no length either, so the server has to know each one's format to read past it (ObjectCreate: router id, then the router's own data).
+
+Also answered now: `profile.xboxlive.com` batch settings (picture settings must be URLs; an empty one crashes the pause menu at `14124F916`).
+
+`Run-Test.ps1` takes screenshots every 10 s after the Select press (`captures/shots`).
+
 ## Next
 
-1. Decode that handshake from the client's receive path and answer it.
-2. Answer the remaining LSP calls with real data.
+1. Decode ObjectCreate/ObjectUpdate (the routers behind `MessageDispatcher`, `141764530`) from the client's packet, and find what the client waits for before leaving "Joining Session".
+2. Decide between a relay server (forward each client's objects to the others) and simulating what Turn 10's server sent.
+3. Answer the remaining LSP calls with real data.
