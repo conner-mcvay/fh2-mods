@@ -131,6 +131,7 @@ static int wrap_streams(const wchar_t *cls, GUID *iid, void **out);  // proxy.c
 static int fix_streams(const wchar_t *cls, GUID *iid, void **out);   // streams.c
 static int fix_party(const wchar_t *cls, GUID *iid, void **out);     // party.c
 static int fix_association(const wchar_t *cls, GUID *iid, void **out);  // assoc.c
+static void game_patches(void);                                         // patches.c
 
 // vccorlib110: ?GetActivationFactoryByPCWSTR@@YAJPEAXAEAVGuid@Platform@@PEAPEAX@Z (name, iid, out)
 typedef HRESULT (*GetAF_t)(void *, GUID *, void **);
@@ -458,6 +459,7 @@ static HRESULT STDMETHODCALLTYPE s_tokBuf(void *t, void *m, void *u, void *h, vo
 #include "streams.c"
 #include "party.c"
 #include "assoc.c"
+#include "patches.c"
 
 // Azimuth 0.9.7's vtables (RVAs in azimuth.exe), checked slot by slot before patching.
 typedef struct { DWORD table; int slot; DWORD expect; void *fn; } VtPatch;
@@ -496,6 +498,7 @@ static DWORD WINAPI worker(LPVOID p) {
   }
   if (g_realSockets) real_sockets(GAME_BASE, "the game");
   if (g_fakeToken) install_token_hooks();
+  game_patches();
   trace_install(L"Game", GAME_BASE, 0x140000000ULL, "game");
   xhr_init();
   for (i = 0; i < 6000; i++) {     // up to ~10 minutes at 100 ms
@@ -536,6 +539,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   g_realSockets = GetPrivateProfileIntW(L"net", L"RealSockets", 0, g_ini);
   g_fakeParty = GetPrivateProfileIntW(L"net", L"FakeParty", 0, g_ini);
   g_fakeAssociation = GetPrivateProfileIntW(L"net", L"FakeAssociation", 0, g_ini);
+  g_skipWeatherWait = GetPrivateProfileIntW(L"net", L"SkipWeatherWait", 0, g_ini);
   GetPrivateProfileStringW(L"net", L"ServerAddress", L"::1", g_serverIp6, 64, g_ini);
   g_serverPort = GetPrivateProfileIntW(L"net", L"ServerPort", 5101, g_ini);
   GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);

@@ -102,6 +102,10 @@ def read_pong(r):
     return dict(echo=r.bits(32), time=r.bits(32))
 
 
+def ping(now):
+    return BitWriter().bits(3, 7).bits(now & 0xFFFFFFFF, 32)
+
+
 def pong(echo, now):
     return BitWriter().bits(4, 7).bits(echo & 0xFFFFFFFF, 32).bits(now & 0xFFFFFFFF, 32)
 
@@ -115,6 +119,69 @@ def time_sync(index, now):
 
 def sync_done(own_attempt):
     return BitWriter().bits(6, 7).bits(own_attempt, 32)
+
+
+# Object messages (NerdLib SyncedObject, 1417B1150 / 1417AB160). ObjectCreate (7) and ObjectUpdate (8):
+#   router id (4 bits, 1422E4410), handle, [Create, if the router's manager has more than one type: type id],
+#   seq u8, payload size u14 (bits), payload (per changed var: var index, var data).
+# Handle (1417B0E40): two flag bits a, b, then the id (the manager's width). a=b=1: flag 29; b only: flag 30 and
+#   an 8-bit peer index follows (the object belongs to that peer, not to the sender); a only: flag 31.
+#   Plain (0, 0): the object belongs to the connection it came from.
+# Routers seen (id bits, type bits or 0): 1, 2, 3: (7, 0) - the player's objects; 9: (4, 2), 3 types;
+#   12: (4, 2), 2 types; 6: (2, 2), the lobby's: type 0 SessionHost, 1 GameOptions (only the server makes these).
+#   Also registered: 8, 10, 11.
+ROUTERS = {1: (7, 0), 2: (7, 0), 3: (7, 0), 6: (2, 2), 9: (4, 2), 12: (4, 2)}
+
+
+def read_object(r, msg):
+    """ObjectCreate/ObjectUpdate after the message id; the payload is kept as raw bits."""
+    router = r.bits(4)
+    idw, typew = ROUTERS.get(router, (None, None))
+    if idw is None:
+        raise ValueError(f'unknown router {router}')
+    a, b = r.bits(1), r.bits(1)
+    o = dict(router=router, a=a, b=b, id=r.bits(idw))
+    if b and not a:
+        o['peer'] = r.bits(8)
+    if msg == 7 and typew:
+        o['type'] = r.bits(typew)
+    o['seq'] = r.bits(8)
+    n = r.bits(14)
+    o['payload'] = BitWriter()
+    for _ in range(n):
+        o['payload'].bits(r.bits(1), 1)
+    return o
+
+
+def object_msg(msg, router, id, seq, payload=None, peer=None, type=0):
+    idw, typew = ROUTERS[router]
+    w = BitWriter().bits(msg, 7).bits(router, 4)
+    w.bits(0, 1).bits(1 if peer is not None else 0, 1).bits(id, idw)
+    if peer is not None:
+        w.bits(peer, 8)
+    if msg == 7 and typew:
+        w.bits(type, typew)
+    w.bits(seq & 0xFF, 8).bits(payload.pos if payload else 0, 14)
+    return concat(w, payload) if payload else w
+
+
+def server_update(router, id, seq, payload):
+    """An ObjectUpdate from the server for server-owned vars of a console's own object: handle flags (1, 1)
+    and the console's own object id (SyncedObject::PackServerUpdateObjectId, 1417B1A20)."""
+    idw, _ = ROUTERS[router]
+    w = BitWriter().bits(8, 7).bits(router, 4).bits(1, 1).bits(1, 1).bits(id, idw)
+    w.bits(seq & 0xFF, 8).bits(payload.pos, 14)
+    return concat(w, payload)
+
+
+# ConsoleSynced (router 3; NerdLib 1417DE550): 9 vars, so a 4-bit var index. 0 RenderReady, 1 SessionEntryFinalised,
+# 2 ParticipatingInRace, 3 RaceInProgress, 4 Ready, 5 HasLoadedCarsForAllParticipants, 6 HasGrid,
+# 7 AvailableArbitration, 8 MatchTicketArbiter. Bools are 1 bit; 1, 2 and 4 are the server's (SyncedBool<0,1>).
+CONSOLE_SESSION_ENTRY_FINALISED = 1
+
+
+def bool_var(index, value, index_bits=4):
+    return BitWriter().bits(index, index_bits).bits(1 if value else 0, 1)
 
 
 def concat(*msgs):

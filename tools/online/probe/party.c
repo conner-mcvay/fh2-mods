@@ -19,8 +19,11 @@ static void *completed_action(const char *what) {
 }
 
 #define PS(t) ((QosStatics *)(t))
+// Every other slot is forwarded to Azimuth's statics, and its first 20 calls are logged.
 #define PS_FWD(slot) static HRESULT STDMETHODCALLTYPE ps_##slot(void *t, void *a, void *b, void *c, void *d, void *e, void *f) { \
-  return VCALL(PS(t)->real, slot, HRESULT (STDMETHODCALLTYPE *)(void *, void *, void *, void *, void *, void *, void *))(PS(t)->real, a, b, c, d, e, f); }
+  static LONG n; HRESULT hr = VCALL(PS(t)->real, slot, HRESULT (STDMETHODCALLTYPE *)(void *, void *, void *, void *, void *, void *, void *))(PS(t)->real, a, b, c, d, e, f); \
+  if (InterlockedIncrement(&n) <= 20) logf("Party slot %d (%p %p %p) -> 0x%08lx, called from %p", slot, a, b, c, hr, __builtin_return_address(0)); \
+  return hr; }
 PS_FWD(3) PS_FWD(4) PS_FWD(5) PS_FWD(8) PS_FWD(9) PS_FWD(10) PS_FWD(11) PS_FWD(12) PS_FWD(13) PS_FWD(14) PS_FWD(15) PS_FWD(16)
 PS_FWD(17) PS_FWD(18) PS_FWD(19) PS_FWD(20) PS_FWD(21) PS_FWD(22) PS_FWD(23) PS_FWD(24) PS_FWD(25) PS_FWD(26) PS_FWD(27)
 static HRESULT STDMETHODCALLTYPE ps_QI(void *t, const GUID *iid, void **out) {

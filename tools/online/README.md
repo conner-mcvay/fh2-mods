@@ -101,8 +101,21 @@ Also answered now: `profile.xboxlive.com` batch settings (picture settings must 
 
 `Run-Test.ps1` takes screenshots every 10 s after the Select press (`captures/shots`).
 
+## In online free roam (2026-10-15)
+
+The server is now a relay (`server/relay.py`): consoles own their objects and the server forwards them, as Turn 10's did (handles have a "relay" flag for exactly that). With it, the game joins and drives in online free roam ("Players 1: Player 1", the leader's crown). What it took, in the order the client waits for it (stateflow `network_matchmaking.xml` / `network.xml` in `media\stateflow.zip`):
+
+1. **SessionHost**: the client waits for the lobby's SessionHost object (router 6, type 0), which only the server makes. The relay sends an empty ObjectCreate for it when a console is synced.
+2. **Keepalive**: consoles stop pinging once in and drop a server they haven't heard from for 10 s; the relay pings every 0.5 s.
+3. **Weather**: the server was to ask the joining console for its weather (RequestSendFullWeather, 53), get it back (FullWeather, 54) and make the weather object (router 10) from it. Not done yet: `[net] SkipWeatherWait=1` (fh2net `patches.c`) ends that wait instead; the next state skips itself without a weather object.
+4. **SessionEntryFinalised**: when the console sends FinaliseSessionEntry (34, no fields), the server sets the SessionEntryFinalised bool on the console's own ConsoleSynced object (router 3) with a server update: handle flags (1, 1) + the object's id, and the object's server-update seq, which must start at 0 (updates are taken strictly in order).
+5. fh2net answers the secure association's DestroyAsync (leaving a session crashed the game before).
+
+Object messages (all in `nerd.py`): ObjectCreate/Update are router id (4 bits), handle (flags a/b: 1/1 server update, 0/1 relay + 8-bit peer index, 1/0 transfer, 0/0 the sender's own; then the id, whose width is the router's), [Create, when the router has several types: type id], seq u8, payload size u14, payload (per var: var index - bit length of the var count - and its data). Routers: 1, 2, 3 the player's (3 is ConsoleSynced), 6 the lobby (SessionHost, GameOptions), 8, 9 Road Trip, 10 weather, 11, 12 Bucket List. The message table also has a description of many messages (`142F4DB20`, second pointer), which spell out the server's role.
+
 ## Next
 
-1. Decode ObjectCreate/ObjectUpdate (the routers behind `MessageDispatcher`, `141764530`) from the client's packet, and find what the client waits for before leaving "Joining Session".
-2. Decide between a relay server (forward each client's objects to the others) and simulating what Turn 10's server sent.
-3. Answer the remaining LSP calls with real data.
+1. Relay the car itself: CarPredictionFull (15, ~30 a second, unsequenced) - its format, then forward with the peer's handle. Then the other messages consoles send (35, 71, ...).
+2. Two consoles: a second machine (or a second instance with its own identity: user id, gamertag, port).
+3. Weather (above), so consoles share it instead of skipping the wait.
+4. Answer the remaining LSP calls with real data.

@@ -27,9 +27,10 @@ static LONG CALLBACK trace_handler(EXCEPTION_POINTERS *e) {
       if (n <= 40) {
         logf("trace %s %p hit %ld: rcx %llx rdx %llx r8 %llx r9 %llx rax %llx rbx %llx rsi %llx rdi %llx [rsp] %llx", g_trace[i].tag, at, n,
              c->Rcx, c->Rdx, c->R8, c->R9, c->Rax, c->Rbx, c->Rsi, c->Rdi, *(ULONG64 *)c->Rsp);
-        // the first 32 bytes rcx and rdx point at, when readable
-        DWORD64 regs[2] = { c->Rcx, c->Rdx }; const char *rn[2] = { "rcx", "rdx" };
-        for (int r = 0; r < 2; r++) {
+        // the first 32 bytes rcx, rdx, rbx, r8 and *r8 point at, when readable
+        DWORD64 regs[5] = { c->Rcx, c->Rdx, c->Rbx, c->R8, 0 }; const char *rn[5] = { "rcx", "rdx", "rbx", "r8", "*r8" };
+        if (c->R8 >= 0x10000 && readable((void *)c->R8, 8)) regs[4] = *(DWORD64 *)c->R8;   // one level through r8
+        for (int r = 0; r < 5; r++) {
           if (regs[r] < 0x10000 || !readable((void *)regs[r], 32)) continue;
           const DWORD *w = (const DWORD *)regs[r];
           logf("    [%s] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", rn[r], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);

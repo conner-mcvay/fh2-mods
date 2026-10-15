@@ -8,7 +8,7 @@ gets 503.
 import argparse, datetime, hashlib, http.server, json, os, struct, sys, threading, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import nerd, xls
+import relay, xls
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
@@ -298,76 +298,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
-NERD_NAMES = {0: 'OpenConnection', 1: 'OpenConnectionResponse', 2: 'CloseConnection', 3: 'Ping', 4: 'Pong',
-              5: 'TimeSync', 6: 'ConnectionSyncDone', 7: 'ObjectCreate', 8: 'ObjectUpdate', 9: 'ObjectDelete'}
-
-
-def udp_listener(port=5101):
-    """The game server's UDP endpoint: the address fh2net's SecureDeviceAssociation hands the game ([::1]:5101).
-    Records every packet (captures/udp.jsonl) and plays the server's side of the NerdCore connection (nerd.py):
-    OpenConnection -> OpenConnectionResponse Ok; the client's ResponseAck -> TimeSync + ConnectionSyncDone;
-    Ping -> Pong; every sequenced packet is acked. Game messages (id 7 and up) are only logged: they carry no
-    length, so the rest of such a packet can't be read without their formats."""
-    import socket
-    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
-    s.bind(('::1', port))
-    print(f'fh2srv game UDP on [::1]:{port}', flush=True)
-    t0 = time.monotonic()
-    peers = {}
-    n = 0
-    own_attempt = 1
-    while True:
-        data, addr = s.recvfrom(65536)
-        n += 1
-        now = int((time.monotonic() - t0) * 1000) + 1
-        stamp = time.strftime('%H:%M:%S')
-        peer = peers.setdefault(addr, {'acks': nerd.Acks(), 'sync_index': 0})
-        out, notes = [], []
-        p = nerd.parse(data)
-        if p:
-            hdr, r = p
-            peer['acks'].add(hdr['id'])
-            notes.append(f'id {hdr["id"]} ack {hdr["ack"]}:{hdr["ackbits"]:08x} cnt {hdr["count"]}')
-            for _ in range(hdr['count']):
-                if r.left() < 7:
-                    break
-                msg = r.bits(7)
-                name = NERD_NAMES.get(msg, f'msg {msg}')
-                if msg == 0:
-                    oc = nerd.read_open_connection(r)
-                    notes.append(f'{name} {oc}')
-                    out.append(nerd.open_response(oc['flags'], 0, oc['attempt'], own_attempt))
-                elif msg == 1:
-                    resp = nerd.read_open_response(r)
-                    notes.append(f'{name} {resp}')
-                    if resp['reason'] == 6 and not peer.get('synced'):
-                        peer['synced'] = True
-                        out.append(nerd.time_sync(peer['sync_index'], now)); peer['sync_index'] += 1
-                        out.append(nerd.sync_done(own_attempt))
-                elif msg == 3:
-                    ping = nerd.read_ping(r)
-                    notes.append(f'{name} {ping["time"]}')
-                    out.append(nerd.pong(ping['time'], now))
-                elif msg == 4:
-                    notes.append(f'{name} {nerd.read_pong(r)}')
-                else:
-                    notes.append(f'{name} (+{r.left()} bits, not parsed)')
-                    break
-        rec = {'n': n, 'time': time.time(), 'from': f'[{addr[0]}]:{addr[1]}', 'hex': data.hex(), 'what': ' | '.join(notes)}
-        sequenced = p and p[0]['id'] != nerd.NO_SEQ
-        reply = None
-        if out or sequenced:
-            ack, ackbits = peer['acks'].header()
-            reply = nerd.packet(nerd.concat(*out), count=len(out), ack=ack, ackbits=ackbits)
-            s.sendto(reply, addr)
-            rec['reply'] = reply.hex()
-        with lock, open(os.path.join(args.out, 'udp.jsonl'), 'a', encoding='utf-8') as f:
-            f.write(json.dumps(rec) + '\n')
-        quiet = notes and all(x.startswith(('Ping', 'Pong', 'id 65535')) for x in notes[1:]) and n > 30
-        if not quiet or n % 50 == 0:
-            print(f'{stamp} udp #{n} {len(data)} bytes: {rec["what"]}' + (f' -> {len(out)} msgs, {len(reply)} bytes' if reply else ''), flush=True)
-
-
-threading.Thread(target=udp_listener, daemon=True).start()
+relay.start(args.out, lock)
 print(f'fh2srv listening on 127.0.0.1:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()

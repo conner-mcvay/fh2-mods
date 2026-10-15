@@ -12,7 +12,7 @@ static int g_serverPort;
 
 // The association. Slot 9 (GetRemoteSocketAddressBytes: array length, bytes) answers the server's
 // sockaddr_in6 - the game's own socket is IPv6, bound to [::]:5100 (the manifest's SecureConsoleSocket).
-// Every other slot is still a logging probe.
+// Slot 8 (DestroyAsync) answers a completed action; every other slot is still a logging probe.
 static HRESULT STDMETHODCALLTYPE sda_RemoteBytes(Probe *t, UINT32 len, BYTE *bytes) {
   (void)t;
   struct sockaddr_in6 a = { 0 };
@@ -23,8 +23,12 @@ static HRESULT STDMETHODCALLTYPE sda_RemoteBytes(Probe *t, UINT32 len, BYTE *byt
   logf("association: remote socket address [%ls]:%d", g_serverIp6, g_serverPort);
   return S_OK;
 }
+// Slot 8 (DestroyAsync, out IAsyncAction): the game leaving the session (14179EA70) - a completed action.
+static HRESULT STDMETHODCALLTYPE sda_Destroy(Probe *t, void **out) {
+  (void)t; logf("association: DestroyAsync -> completed"); *out = completed_action("SecureDeviceAssociation.Destroy"); return S_OK;
+}
 static void *g_sdaVtbl[] = { pr_QI, pr_AddRef, pr_Release, prof_GetIids, prof_GetRuntimeClassName, prof_GetTrustLevel,
-  pr_6, pr_7, pr_8, sda_RemoteBytes, pr_10, pr_11, pr_12, pr_13, pr_14, pr_15, pr_16, pr_17, pr_18, pr_19, pr_20, pr_21, pr_22, pr_23 };
+  pr_6, pr_7, sda_Destroy, sda_RemoteBytes, pr_10, pr_11, pr_12, pr_13, pr_14, pr_15, pr_16, pr_17, pr_18, pr_19, pr_20, pr_21, pr_22, pr_23 };
 static Probe g_assocProbe = { g_sdaVtbl, "SecureDeviceAssociation" };
 
 // An IAsyncOperation<T> already completed with `result` (the token operation's object).
