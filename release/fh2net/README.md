@@ -2,6 +2,8 @@
 
 Experimental. fh2net lets FH2 on Azimuth join **online free roam** with other players through a server you run yourself (on a LAN, or over the internet with port forwarding). Microsoft's and Turn 10's services are long gone; nothing here contacts them.
 
+**No Turn 10 or Microsoft code is used.** fh2net and the server are written from scratch, and the package contains no game files. The server reads the game's message formats at runtime from your own copy of FH2.
+
 > **Warning: while fh2net is installed, drivatars and progression are broken in single player.** This is a known bug, to be fixed later. For a normal single-player session, uninstall fh2net first (`Install-Fh2net.ps1 -Uninstall`; it keeps your settings) and install it again when you want to play online.
 
 ## What you need
@@ -78,3 +80,8 @@ extras\               controller scripts for testing ([input] Script=): idle (fa
 ```
 
 Troubleshooting: fh2net logs to `<Azimuth folder>\data\bin\fh2net.log`; the server records every request in `server\captures\`.
+
+## Credits
+
+- **[Azimuth](https://almost-there-games.itch.io/azimuth)** by Almost There Games, which runs Forza Horizon 2 on PC. fh2net is a plug-in for it and wouldn't exist without it.
+- **[FH2 Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)** by RokkuDayo, which fh2net loads alongside itself.
