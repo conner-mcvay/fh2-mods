@@ -24,6 +24,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+# writes a new file and swaps it in, so a target that is a hard link (e.g. a test copy of a game folder) is
+# replaced rather than written through to the file it shares data with
+function Set-File([string]$src, [string]$dst) { $tmp = "$dst.fh2-new"; Copy-Item -LiteralPath $src -Destination $tmp -Force; Move-Item -LiteralPath $tmp -Destination $dst -Force }
 
 $pkg = $PSScriptRoot
 $m = Get-Content -LiteralPath (Join-Path $pkg 'install.json') -Raw | ConvertFrom-Json
@@ -72,7 +75,7 @@ try {
     if ($existed) { $saved = Join-Path $backup ('files\' + $f.target); New-Item -ItemType Directory -Path (Split-Path $saved) -Force | Out-Null; Copy-Item -LiteralPath $t -Destination $saved }
     $record += [pscustomobject]@{ target = $f.target; existed = $existed; backup_sha256 = $(if ($existed) { Sha $saved } else { $null }); installed_sha256 = $f.sha256 }
     New-Item -ItemType Directory -Path (Split-Path $t) -Force | Out-Null
-    Copy-Item -LiteralPath (Join-Path $pkg $f.source) -Destination $t -Force
+    Set-File (Join-Path $pkg $f.source) $t
     if ((Sha $t) -ne $f.sha256) { throw "Install verification failed: $($f.target)" }
   }
   if (-not $iniOn) {   # Extra Options reads the override folders only with [Files] EnableMediaOverrides=1
@@ -90,7 +93,7 @@ try {
   Write-Warning "Install failed; rolling back. $_"
   foreach ($r in $record) {
     $t = Join-Path $mount $r.target
-    if ($r.existed) { Copy-Item -LiteralPath (Join-Path $backup ('files\' + $r.target)) -Destination $t -Force } elseif (Test-Path -LiteralPath $t) { Remove-Item -LiteralPath $t }
+    if ($r.existed) { Set-File (Join-Path $backup ('files\' + $r.target)) $t } elseif (Test-Path -LiteralPath $t) { Remove-Item -LiteralPath $t }
   }
   throw
 }

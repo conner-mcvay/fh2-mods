@@ -15,6 +15,8 @@
 param([Parameter(Mandatory)][string]$BackupRoot)
 $ErrorActionPreference = 'Stop'
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
+# writes a new file and swaps it in, so a hard-linked target isn't written through
+function Set-File([string]$src, [string]$dst) { $tmp = "$dst.fh2-new"; Copy-Item -LiteralPath $src -Destination $tmp -Force; Move-Item -LiteralPath $tmp -Destination $dst -Force }
 
 $BackupRoot = (Resolve-Path -LiteralPath $BackupRoot).Path
 $r = Get-Content -LiteralPath (Join-Path $BackupRoot 'restore.json') -Raw | ConvertFrom-Json
@@ -37,8 +39,8 @@ if ($az -and (Sha $azExe) -ne $r.azimuth.installed_sha256) { throw "azimuth.exe 
 
 foreach ($f in $r.files) {
   $t = Join-Path $mount $f.target
-  if ($f.existed) { Copy-Item -LiteralPath (Join-Path $BackupRoot ('files\' + $f.target)) -Destination $t -Force } else { Remove-Item -LiteralPath $t }
+  if ($f.existed) { Set-File (Join-Path $BackupRoot ('files\' + $f.target)) $t } else { Remove-Item -LiteralPath $t }
 }
-if ($az) { Copy-Item -LiteralPath (Join-Path $BackupRoot $r.azimuth.backup) -Destination $azExe -Force }
+if ($az) { Set-File (Join-Path $BackupRoot $r.azimuth.backup) $azExe }
 Set-Content -LiteralPath $done -Value "uninstalled $(Get-Date -Format 's')"
 Write-Output "Uninstalled $($r.mod). The files it installed are back to their state before installation."
