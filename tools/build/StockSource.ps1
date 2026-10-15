@@ -1,7 +1,9 @@
 # Base FH2 files for builds: from the game package (.zip of the Anthem_* folder) or from a game folder (the one
 # containing Mount). Game-folder files are checked against stock-hashes.json, so a build never starts from a modded
 # file - unless -Layer: then the build goes on top of whatever is installed, so mods stack (the game exe must still be
-# stock). Paths are relative to Mount ("media\zipmanifest.xml", "hash.manifest"). Dot-source, then Open-StockSource.
+# stock). Mods install into Mount\mediapc (Extra Options' override folder, which the game reads before Mount\media),
+# so with -Layer a media\<path> is read from Mount\mediapc\<path> when a mod installed one there.
+# Paths are relative to Mount ("media\zipmanifest.xml"). Dot-source, then Open-StockSource.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
 function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
@@ -22,6 +24,25 @@ function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
   } elseif ($Layer) { throw '-Layer needs -Game' } else { throw 'Pass -Package <Anthem_*.zip> or -Game <folder containing Mount> (or set FH2_PACKAGE / FH2_GAME)' }
 }
 
+function Get-LayerPath([string]$rel) {   # where a game-folder file is read from: mediapc's copy first (-Layer)
+  if ($script:Stock.Layer -and $rel -match '^media\\(.+)$') {
+    $pc = Join-Path $script:Stock.Mount ('mediapc\' + $Matches[1])
+    if (Test-Path -LiteralPath $pc -PathType Leaf) { return $pc }
+  }
+  return Join-Path $script:Stock.Mount $rel
+}
+
+function Get-GameMediaFile([string]$GameRoot, [string]$rel) {
+  # a media file as the game sees it (FileInfo, or $null): the copy a mod installed in Mount\mediapc, else Mount\media's
+  foreach ($d in 'mediapc', 'media') { $p = Join-Path $GameRoot "Mount\$d\$rel"; if (Test-Path -LiteralPath $p -PathType Leaf) { return Get-Item -LiteralPath $p } }
+  return $null
+}
+
+function Get-InstalledPath([string]$rel) {   # Mount-relative path a mod installs media\<path> to
+  if ($rel -match '^media\\(.+)$') { return 'mediapc\' + $Matches[1] }
+  return $rel
+}
+
 function Close-StockSource {
   if ($script:Stock -and $script:Stock.Archives) { foreach ($a in $script:Stock.Archives.Values) { $a.Dispose() } }
   if ($script:Stock -and $script:Stock.TempFiles) { $script:Stock.TempFiles | Remove-Item -ErrorAction SilentlyContinue }
@@ -31,7 +52,7 @@ function Close-StockSource {
 
 function Test-StockFile([string]$rel) {   # does the base have this file?
   if ($script:Stock.Kind -eq 'package') { return $script:Stock.Entries.ContainsKey($rel.ToLowerInvariant()) }
-  return (Test-Path -LiteralPath (Join-Path $script:Stock.Mount $rel) -PathType Leaf)
+  return (Test-Path -LiteralPath (Get-LayerPath $rel) -PathType Leaf)
 }
 
 function Copy-StockEntry([string]$zipRel, [string]$entry, [string]$dest) {
@@ -47,7 +68,7 @@ function Copy-StockEntry([string]$zipRel, [string]$entry, [string]$dest) {
       $script:Stock.TempFiles = @($script:Stock.TempFiles) + $tmp
       $script:Stock.Archives[$k] = [IO.Compression.ZipFile]::OpenRead($tmp)
     } else {
-      $script:Stock.Archives[$k] = [IO.Compression.ZipFile]::OpenRead((Join-Path $script:Stock.Mount $zipRel))
+      $script:Stock.Archives[$k] = [IO.Compression.ZipFile]::OpenRead((Get-LayerPath $zipRel))
     }
   }
   $want = $entry.Replace('\', '/')
@@ -57,10 +78,12 @@ function Copy-StockEntry([string]$zipRel, [string]$entry, [string]$dest) {
   [IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
 }
 
-function Get-StockList {   # every stock path under Mount (lowercase)
+function Get-StockList {   # every path under Mount (lowercase); with -Layer, mediapc's files count as media's
   if ($script:Stock.Kind -eq 'package') { return @($script:Stock.Entries.Keys) }
   $m = $script:Stock.Mount
-  return @(Get-ChildItem -Recurse -File $m | ForEach-Object { $_.FullName.Substring($m.Length + 1).ToLowerInvariant() })
+  $all = @(Get-ChildItem -Recurse -File $m | ForEach-Object { $_.FullName.Substring($m.Length + 1).ToLowerInvariant() })
+  if ($script:Stock.Layer) { $all = @($all | ForEach-Object { if ($_ -match '^mediapc\\(.+)$') { 'media\' + $Matches[1] } else { $_ } } | Select-Object -Unique) }
+  return $all
 }
 
 function Get-StockHash([string]$rel) {   # stock SHA-256 of a file, or $null when unknown / not a stock file
@@ -72,9 +95,10 @@ function Get-StockHash([string]$rel) {   # stock SHA-256 of a file, or $null whe
   return $null
 }
 
-function Get-BaseHash([string]$rel) {   # SHA-256 of the file a build starts from, or $null when the base has no such file
-  if (-not $script:Stock.Layer) { return Get-StockHash $rel }
-  $p = Join-Path $script:Stock.Mount $rel
+function Get-BaseHash([string]$rel) {   # SHA-256 of what a mod's install target (Get-InstalledPath) holds now, or $null
+  # when it's absent: without -Layer the build expects nothing there; with -Layer, what's installed
+  if (-not $script:Stock.Layer) { return $null }
+  $p = Join-Path $script:Stock.Mount (Get-InstalledPath $rel)
   if (Test-Path -LiteralPath $p) {
     try { return (Get-FileHash -LiteralPath $p -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant() }
     catch { throw "Can't read Mount\$rel; close the game first. ($($_.Exception.Message))" }
@@ -89,7 +113,7 @@ function Copy-StockFile([string]$rel, [string]$dest) {
     if (-not $script:Stock.Entries.ContainsKey($k)) { throw "Stock file not found in package: Mount\$rel" }
     [IO.Compression.ZipFileExtensions]::ExtractToFile($script:Stock.Entries[$k], $dest, $true); return
   }
-  $src = Join-Path $script:Stock.Mount $rel
+  $src = Get-LayerPath $rel
   if (-not (Test-Path $src)) { throw "Stock file not found in game folder: Mount\$rel" }
   $want = $script:Stock.Hashes[$k]
   if ($script:Stock.Layer) { }   # building on top of installed mods: take the file as it is

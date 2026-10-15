@@ -14,7 +14,9 @@
 
   Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb, other
   mods), and cars the game already has aren't offered. Each run gets its own backup folder (mod-backups\<Name>-<time>)
-  with an Uninstall.ps1; undo runs newest first. Requires FH2 1.0.0.64 on Azimuth 0.9.7 and FM5 1.0.0.20.
+  with an Uninstall.ps1; undo runs newest first. The cars install into Mount\mediapc, which Extra Options (0.2.74 or
+  later) makes the game read before Mount\media; the game's own files aren't changed. Requires FH2 1.0.0.64 on
+  Azimuth with Extra Options 0.2.74+, and FM5 1.0.0.20.
   sqlite3.exe is downloaded from sqlite.org (hash-checked) if it isn't on PATH.
 
 .EXAMPLE
@@ -102,7 +104,8 @@ $layers = @(Get-ChildItem (Join-Path $GameRoot 'mod-backups') -Directory -ErrorA
   Where-Object { $_.Name -notlike '*-uninstalled' -and (Test-Path (Join-Path $_.FullName 'cars.json')) -and -not (Test-Path (Join-Path $_.FullName 'uninstalled.txt')) })
 $state = @($layers | ForEach-Object { $l = $_; (Get-Content (Join-Path $l.FullName 'cars.json') -Raw | ConvertFrom-Json) | ForEach-Object { $_ | Add-Member -NotePropertyName layer -NotePropertyValue $l.FullName -PassThru } })
 $importedIds = @($state | ForEach-Object { $_.id }) + -1
-$fhDb = (Join-Path $GameRoot 'Mount\media\stripped\gamedbRC.slt').Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
+. (Join-Path $tools '..\build\StockSource.ps1')   # Get-GameMediaFile: what the game reads (Mount\mediapc first)
+$fhDb = (Get-GameMediaFile $GameRoot 'stripped\gamedbRC.slt').FullName.Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
 function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sql (PowerShell 5.1 native argument quirk)
   $out = & $Sqlite -bail -list -separator '|' ':memory:' "ATTACH 'file:$fmDb`?immutable=1' AS fm;" "ATTACH 'file:$fhDb`?immutable=1' AS fh;" $sql
   if ($LASTEXITCODE -ne 0) { throw "sqlite3 failed: $sql" }
@@ -121,7 +124,7 @@ function Engine-Of([string]$fh2Car) {   # stock engine sound (engine MediaName) 
 
 # Autoshow groups (CarBuckets under a top-level group), names from FH2's English string table
 . (Join-Path $tools 'WheelSwap.ps1')
-$bucketNames = Read-StringTable (Join-Path $GameRoot 'Mount\media\stripped\stringtables\EN.zip') 'CarBuckets.str'
+$bucketNames = Read-StringTable (Get-GameMediaFile $GameRoot 'stripped\stringtables\EN.zip').FullName 'CarBuckets.str'
 $groupRows = Q 'SELECT b.Id, b.Name, p.Name, (SELECT COUNT(*) FROM fh.Data_Car_Buckets x WHERE x.CarBucket = b.Id), (SELECT c.MediaName FROM fh.Data_Car_Buckets x JOIN fh.Data_Car c ON c.Id = x.CarId WHERE x.CarBucket = b.Id ORDER BY c.Id LIMIT 1) FROM fh.CarBuckets b JOIN fh.CarBuckets p ON p.Id = b.ParentBucketId ORDER BY p.SortPriority, p.Id, b.SortPriority, b.Id'
 $groups = @($groupRows | ForEach-Object {
   $n = Resolve-String $bucketNames $_[1]; if (-not $n) { $n = "(no name, e.g. $($_[4]))" }   # the game has a group without an English name
@@ -175,9 +178,9 @@ function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$Allow
 $lightInfo = @{}
 function Light-Info([string]$fh2Car) {
   if ($lightInfo.ContainsKey($fh2Car)) { return $lightInfo[$fh2Car] }
-  $zp = Join-Path $GameRoot "Mount\media\cars\$fh2Car.zip"; $r = [pscustomobject]@{ Has = $false; Warm = $false }
-  if (Test-Path $zp) {
-    $z = [IO.Compression.ZipFile]::OpenRead($zp)
+  $zp = Get-GameMediaFile $GameRoot "cars\$fh2Car.zip"; $r = [pscustomobject]@{ Has = $false; Warm = $false }
+  if ($zp) {
+    $z = [IO.Compression.ZipFile]::OpenRead($zp.FullName)
     try {
       $r.Has = [bool]($z.Entries | Where-Object FullName -eq 'Lights.bin')
       $dbg = $z.Entries | Where-Object FullName -eq 'LightPresets.bin_debug'

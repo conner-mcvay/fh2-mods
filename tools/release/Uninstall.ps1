@@ -1,13 +1,15 @@
 <#
 .SYNOPSIS
-  Undoes Install.ps1: restores the backed-up files, removes the files the mod added, restores azimuth.exe.
+  Undoes Install.ps1: restores the backed-up files and removes the files the mod added (in Mount\mediapc).
 
 .DESCRIPTION
   Refuses to touch anything that changed since installation (e.g. another mod installed on top), so it never
-  overwrites someone else's changes: with several mods installed, uninstall them newest first.
+  overwrites someone else's changes: with several mods installed, uninstall them newest first. Extra Options'
+  EnableMediaOverrides stays on. Backups made by the older installer (which also patched azimuth.exe) are still
+  undone, azimuth.exe included.
 
 .EXAMPLE
-  powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe\mod-backups\fm5-pon-transam-02-20261012-210000"
+  powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe\mod-backups\fm5-cars-20261015-210000"
 #>
 [CmdletBinding()]
 param([Parameter(Mandatory)][string]$BackupRoot)
@@ -30,12 +32,13 @@ foreach ($f in $r.files) {
   if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $f.installed_sha256) { throw "Changed since installation, not restoring: $($f.target). $later" }
   if ($f.existed -and (Sha (Join-Path $BackupRoot ('files\' + $f.target))) -ne $f.backup_sha256) { throw "Corrupt backup: $($f.target)" }
 }
-if ($r.azimuth -and (Sha $azExe) -ne $r.azimuth.installed_sha256) { throw "azimuth.exe changed since installation, not restoring it. $later" }
+$az = $r.PSObject.Properties['azimuth'] -and $r.azimuth   # older installer's backups
+if ($az -and (Sha $azExe) -ne $r.azimuth.installed_sha256) { throw "azimuth.exe changed since installation, not restoring it. $later" }
 
 foreach ($f in $r.files) {
   $t = Join-Path $mount $f.target
   if ($f.existed) { Copy-Item -LiteralPath (Join-Path $BackupRoot ('files\' + $f.target)) -Destination $t -Force } else { Remove-Item -LiteralPath $t }
 }
-if ($r.azimuth) { Copy-Item -LiteralPath (Join-Path $BackupRoot $r.azimuth.backup) -Destination $azExe -Force }
+if ($az) { Copy-Item -LiteralPath (Join-Path $BackupRoot $r.azimuth.backup) -Destination $azExe -Force }
 Set-Content -LiteralPath $done -Value "uninstalled $(Get-Date -Format 's')"
-Write-Output "Uninstalled $($r.mod). Game files and azimuth.exe are back to their state before installation."
+Write-Output "Uninstalled $($r.mod). The files it installed are back to their state before installation."

@@ -26,9 +26,8 @@ $files = @(
   'tools\fm5-import\Import-Fm5Cars.ps1', 'tools\fm5-import\Export-Fm5Car.ps1', 'tools\fm5-import\Add-CarLights.ps1'
   'tools\fm5-import\Add-ImportedCarWheels.ps1', 'tools\fm5-import\WheelSwap.ps1', 'tools\fm5-import\CarLights.cs'
   'tools\fm5-import\ForzaModel.cs', 'tools\fm5-import\Fm5ModelConverter.cs'
-  'tools\build\Build-Mod.ps1', 'tools\build\StockSource.ps1', 'tools\build\Repack-ForzaZip.ps1', 'tools\build\ForzaPathKey.cs'
+  'tools\build\Build-Mod.ps1', 'tools\build\StockSource.ps1', 'tools\build\Repack-ForzaZip.ps1'
   'tools\build\stock-hashes.json', 'tools\build\stock-cars.txt'
-  'tools\azimuth\Patch-Azimuth.ps1'
   'tools\release\Install.ps1', 'tools\release\Uninstall.ps1'
 )
 foreach ($f in $files) {

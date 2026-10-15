@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Builds a release zip from one or more mods in mods\<name>.
 
@@ -19,7 +19,7 @@
 .EXAMPLE
   .\tools\build\Build-Mod.ps1 -Mod cockpit-fov -Package G:\FH2-1\Anthem_1.0.0.64_x64__8wekyb3d8bbwe.zip
 .EXAMPLE
-  .\tools\build\Build-Mod.ps1 -Mod cockpit-fov,dlc-unlock -Name my-setup
+  .\tools\build\Build-Mod.ps1 -Mod cockpit-fov,my-other-mod -Name my-setup
 #>
 param(
   [Parameter(Mandatory)][string[]]$Mod,
@@ -95,19 +95,12 @@ function Use-Zip([string]$rel) {
 }
 $readmes = @()
 $fm5CarZips = @()   # FM5 car zips whose models get converted for FH2's shaders
-$indexDonors = @{}   # new media path (lower) -> stock media path whose index metadata it reuses (from index-donors.txt)
 try {
   foreach ($m in $Mod) {
     $modDir = Join-Path $modsRoot $m
     $modMedia = Join-Path $modDir 'media'
     if (-not (Test-Path $modMedia)) { throw "No media folder in $modDir" }
     if (Test-Path "$modDir\README.txt") { $readmes += "$modDir\README.txt" }
-    if (Test-Path "$modDir\index-donors.txt") {
-      foreach ($line in Get-Content "$modDir\index-donors.txt" | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) {
-        $n, $d = $line -split '\s*<-\s*', 2
-        $indexDonors[$n.Trim().ToLower()] = $d.Trim()
-      }
-    }
 
     # imports ("<FH2 media path> <- <source media path>"): from FM5, or with an "fh2:" source from the base game
     # (e.g. to repackage a file the game already has). Either side may go inside a zip, e.g.
@@ -197,9 +190,6 @@ try {
     # the converter reads FH2's material and shader libraries to learn what each mesh's shader needs
     foreach ($lib in 'cars\_library\Materials.zip', '_library\Shaders.zip') { Get-Stock $lib (Join-Path $work "stock\$lib") }
   }
-  # the base file index decides what's new: a media file is new exactly when its path key isn't in it
-  Copy-StockFile 'hash.manifest' (Join-Path $work 'stock\hash.manifest')
-  $stockIndex = [IO.File]::ReadAllBytes((Join-Path $work 'stock\hash.manifest'))
 } finally { }
 
 # FM5 car models: add the vertex inputs FH2's shaders read (tangents, extra UV sets); without them glass,
@@ -262,67 +252,38 @@ if ($zips.Count) {
 }
 Remove-Item -Recurse -Force $work
 
-# files the stock game doesn't have are invisible to Azimuth until listed in Mount\hash.manifest:
-# append a record per new file (path key + metadata copied from its donor) and ship the patcher for azimuth.exe
-if (-not ('ForzaPathKey' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'ForzaPathKey.cs') }
-$records = @{}
-for ($i = 0; $i -lt $stockIndex.Length; $i += 12) { $records[[BitConverter]::ToUInt64($stockIndex, $i)] = [BitConverter]::ToUInt32($stockIndex, $i + 8) }
-$stockKeys = New-Object 'System.Collections.Generic.HashSet[uint64]'; foreach ($k in $records.Keys) { [void]$stockKeys.Add($k) }
-$new = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring("$build\media".Length + 1) } | Where-Object { -not $records.ContainsKey([ForzaPathKey]::Compute("media\$_")) } | Sort-Object)
-if ($new.Count) {
-  $out = New-Object IO.MemoryStream
-  $out.Write($stockIndex, 0, $stockIndex.Length)
-  foreach ($n in $new) {
-    $donor = $indexDonors[$n.ToLower()]
-    if (-not $donor) { throw "New file media\$n has no index donor; add '$n <- <stock media path>' to the mod's index-donors.txt" }
-    $key = [ForzaPathKey]::Compute("media\$n")
-    $dkey = [ForzaPathKey]::Compute("media\$donor")
-    if ($records.ContainsKey($key)) { throw "Index already has a record for media\$n" }
-    if (-not $records.ContainsKey($dkey)) { throw "Index donor media\$donor isn't in the stock index" }
-    $out.Write([BitConverter]::GetBytes($key), 0, 8); $out.Write([BitConverter]::GetBytes([uint32]$records[$dkey]), 0, 4)
-    $records[$key] = $records[$dkey]
-    Write-Host ("INDEX    media\{0} (metadata {1} from {2})" -f $n, $records[$dkey], $donor)
-  }
-  [IO.File]::WriteAllBytes("$build\hash.manifest", $out.ToArray())
-  New-Item -ItemType Directory "$build\tools" -Force | Out-Null
-  Copy-Item (Join-Path $PSScriptRoot '..\azimuth\Patch-Azimuth.ps1') "$build\tools\"
-  $sha = -join ([Security.Cryptography.SHA256]::Create().ComputeHash($out.ToArray()) | ForEach-Object { $_.ToString('x2') })
-  Write-Host "Wrote hash.manifest ($($out.Length) bytes, SHA-256 $sha); azimuth.exe must be patched to match (tools\Patch-Azimuth.ps1)"
-}
-
-# install.json + Install.ps1/Uninstall.ps1: every payload file with its hash and the hash of the base file it replaces
-# (the stock file, or with -Layer the installed one; $null = the base has no such file)
+# install.json + Install.ps1/Uninstall.ps1. Mods install into Mount\mediapc, Extra Options' override folder: the
+# game reads it before Mount\media and doesn't filter it by Mount\hash.manifest, so new files need no index entry
+# and the game's own files stay untouched. Every payload file is listed with its hash and the hash of what its
+# target holds now ($null = nothing; with -Layer, what earlier mods installed there).
 function Get-Sha([byte[]]$b) { -join ([Security.Cryptography.SHA256]::Create().ComputeHash($b) | ForEach-Object { $_.ToString('x2') }) }
 $payload = @(Get-ChildItem -Recurse -File "$build\media" | ForEach-Object { $_.FullName.Substring($build.Length + 1) })
-if (Test-Path "$build\hash.manifest") { $payload += 'hash.manifest' }
 try {
   $files = foreach ($p in $payload) {
-    $baseSha = if ($Layer) { Get-BaseHash $p } elseif (($p -eq 'hash.manifest') -or $stockKeys.Contains([ForzaPathKey]::Compute($p))) { Get-StockHash $p } else { $null }
-    if (-not $Layer -and -not $baseSha -and $stockKeys.Contains([ForzaPathKey]::Compute($p))) { Write-Warning "No stock hash for Mount\$p; the installer will treat it as a new file" }
-    [ordered]@{ source = $p; target = $p; sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); base_sha256 = $baseSha }
+    [ordered]@{ source = $p; target = (Get-InstalledPath $p); sha256 = Get-Sha ([IO.File]::ReadAllBytes((Join-Path $build $p))); base_sha256 = (Get-BaseHash $p) }
   }
   $gameSha = Get-StockHash 'forza_durango_release_final.exe'
 } finally { Close-StockSource }
 $version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json).game -match '(\d+\.\d+\.\d+\.\d+)') { $Matches[1] } else { 'unknown' }
 [ordered]@{
   name = $Name; mods = $Mod; layered = [bool]$Layer; game_version = $version; game_exe_sha256 = $gameSha
-  azimuth_version = '0.9.7'; azimuth_stock_sha256 = '5d3ce30b440dab2604fe42ff7cd129394f0b98418e22b2a44270f548199bc6a9'
+  install_folder = 'mediapc'; requires = 'Extra Options 0.2.74 or later with [Files] EnableMediaOverrides=1'
   files = @($files)
 } | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot '..\release\Install.ps1'), (Join-Path $PSScriptRoot '..\release\Uninstall.ps1') $build
-if (Test-Path "$build\hash.manifest") { New-Item -ItemType Directory "$build\tools" -Force | Out-Null; Copy-Item (Join-Path $PSScriptRoot '..\azimuth\Patch-Azimuth.ps1') "$build\tools\" -Force }
 $installText = @"
 
 
 INSTALL (automatic)
 -------------------
-Close Azimuth, then in PowerShell from this folder:
+Needs Extra Options 0.2.74 or later (it reads mods from Mount\mediapc). Close Azimuth, then in PowerShell from
+this folder:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "<folder containing Mount>" -AzimuthRoot "<folder containing azimuth.exe>"
 
-It checks your game and Azimuth versions, refuses to overwrite files another mod changed (unless you add -Force),
-backs up everything it replaces$(if (Test-Path "$build\hash.manifest") { ', and patches azimuth.exe to accept this mod''s new files' }).
-It prints the backup folder. To undo:
+It checks your game version, puts the mod's files in Mount\mediapc (the game's own files aren't changed), turns
+on Extra Options' EnableMediaOverrides if it's off, and refuses to overwrite files another mod put there (unless
+you add -Force), backing up anything it replaces. It prints the backup folder. To undo:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot "<printed backup folder>"
 

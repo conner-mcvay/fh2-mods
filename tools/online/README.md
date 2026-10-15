@@ -1,6 +1,6 @@
 ﻿# Online research: private servers for FH2 on Azimuth
 
-Goal: get FH2 (1.0.0.64, Azimuth 0.9.7) out of offline-only mode and talking to a server we run, to work toward private multiplayer. Nothing here contacts Microsoft or Turn 10; their services are gone, and everything goes to our own server.
+Goal: get FH2 (1.0.0.64, on Azimuth 0.9.7 or 0.9.9) out of offline-only mode and talking to a server we run, to work toward private multiplayer. Nothing here contacts Microsoft or Turn 10; their services are gone, and everything goes to our own server.
 
 ## How Azimuth keeps the game offline
 
@@ -45,12 +45,12 @@ What it does:
 
 - Hooks the game's and `Microsoft.Xbox.Services.dll`'s imports (`CoCreateInstance`, WinRT activation, Winsock, `OutputDebugString`) and logs them.
 - `ConnectivityLevel`: wraps the `NetworkInformation` statics so `GetInternetConnectionProfile` answers a profile of that level. The game (`140A2A8B0`) maps level 3 to "internet" and 4 (Xbox's `XboxLiveAccess`) to "Xbox Live".
-- `FakeToken`: replaces Azimuth's `LocalUser` vtable slots 16-18 (RVA `24FF10`) and `LocalUserStatics` slots 15-17 (RVA `250218`) with functions returning an already-completed `IAsyncOperation<GetTokenAndSignatureResult>` whose Token and Signature are the configured string. It checks every slot against Azimuth 0.9.7 first and patches nothing otherwise.
+- `FakeToken`: replaces Azimuth's `LocalUser` vtable slots 16-18 (RVA `24FF10`) and `LocalUserStatics` slots 15-17 (RVA `250218`) with functions returning an already-completed `IAsyncOperation<GetTokenAndSignatureResult>` whose Token and Signature are the configured string. It checks every slot against a known Azimuth build first (`g_azimuthLayouts` in `fh2net.c`: 0.9.7 tables `24FF10`/`250218`, 0.9.9 tables `29D718`/`29D460`, and each build's XboxUserId string) and patches nothing otherwise.
 - `Server`: `CoCreateInstance(FreeThreadedXMLHTTP60)` returns fh2net's own `IXMLHTTPRequest2` (`xhr.c`), which sends over WinHTTP to the server, with the intended host in `X-Fh2net-Host` and scheme in `X-Fh2net-Scheme`.
 
 ## The server (`server/fh2srv.py`)
 
-`py -3 -I server\fh2srv.py [--port 8090]`. Stage 1 records every request to `server/captures/` (`requests.jsonl` plus each body) and answers 503.
+`py -3 -I server\fh2srv.py --game <FH2 game folder> [--host 0.0.0.0] [--port 8090]` (needs `pefile`; the message schemas are read from the game's exe). Stage 1 records every request to `server/captures/` (`requests.jsonl` plus each body) and answers 503.
 
 ## What the game sends (first capture, 2026-10-14)
 
@@ -125,4 +125,8 @@ Object messages (all in `nerd.py`): ObjectCreate/Update are router id (4 bits), 
 
 1. Test with two consoles. The other messages consoles send (35, 71, ...) aren't relayed yet.
 3. Weather (above), so consoles share it instead of skipping the wait.
-4. Answer the remaining LSP calls with real data.
+4. Answer the remaining LSP calls with real data. Known bug: single player's drivatars and progression are broken while fh2net is installed (cause not found yet; the unanswered `Drivatar.*` and `OnlineProfile.*` calls are suspects).
+
+## Release
+
+`tools\release\Make-NetRelease.ps1 -Version <x.y.z>` builds `dist\fh2net-<x.y.z>.zip`: fh2net.dll, the server, `Install-Fh2net.ps1`, an ini template and the player README (`release/fh2net`).

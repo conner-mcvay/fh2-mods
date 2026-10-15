@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.0 (2026-10-15)
+
+- Now for **Azimuth 0.9.9** with **FH2 Extra Options 0.2.74+**. Imports install into `Mount\mediapc`, which Extra Options mounts over the game's media (`[Files] EnableMediaOverrides=1`, turned on by the installer). The game's `Mount\media`, `hash.manifest` and `azimuth.exe` are no longer changed; deleting `Mount\mediapc` removes every import.
+- Removed the `hash.manifest` extension and `azimuth.exe` patching (`Patch-Azimuth.ps1`, `ForzaPathKey.cs`, index donors).
+- Layers build on top of what the game reads (`Mount\mediapc` first, then `Mount\media`).
+- 1.x packages are refused by the new installer; 1.x backups still uninstall (including restoring `azimuth.exe`).
+
 ## 1.0.0 (2026-10-14)
 
 First release.

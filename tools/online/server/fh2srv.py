@@ -3,7 +3,7 @@ with the host it was meant for in X-Fh2net-Host. Every request is recorded in --
 (X-ClassName / X-Method, binary bodies, see xls.py) that have a handler are answered, everything else
 gets 503.
 
-  py -3 -I fh2srv.py [--port 8090] [--out <folder>]
+  py -3 -I fh2srv.py --game <FH2 game folder> [--host 0.0.0.0] [--port 8090] [--out <folder>]
 """
 import argparse, datetime, hashlib, http.server, json, os, struct, sys, threading, time, uuid
 
@@ -15,6 +15,8 @@ ap.add_argument('--port', type=int, default=8090)
 ap.add_argument('--host', default='127.0.0.1', help='HTTP address to listen on; 0.0.0.0 for consoles on the LAN')
 ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP port (all addresses, IPv4 and IPv6)")
 ap.add_argument('--mirror', type=float, help='testing alone: send each console itself back as a ghost player, its car this many seconds late')
+ap.add_argument('--game', default=os.environ.get('FH2_GAME', xls.EXE),
+                help='the FH2 game folder (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) or its exe; the message schemas are read from it')
 ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'captures'))
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -22,7 +24,10 @@ lock = threading.Lock()
 seq = [0]
 
 print('reading message schemas from the game...', flush=True)
-schema = xls.Schema()
+exe = args.game
+if os.path.isdir(exe): exe = os.path.join(exe, 'Mount', 'forza_durango_release_final.exe')
+if not os.path.isfile(exe): sys.exit(f'FH2 game not found: {exe} (pass --game <FH2 game folder>)')
+schema = xls.Schema(exe)
 
 
 def lsp_reply(results_type, results):
@@ -31,7 +36,7 @@ def lsp_reply(results_type, results):
     return struct.pack('>III', 0, 0, len(data)) + data
 
 
-def logon(params):
+def logon(params, ctx):
     ld = params['loginData']
     return lsp_reply('ForzaUserLogon_Results', {'responseData': {
         'isProfileValid': True,
@@ -65,9 +70,78 @@ def logon(params):
     }})
 
 
-# (X-ClassName, X-Method) -> (parameters type, handler(decoded params) -> reply body)
+# Liveries. Saving a design while online sends it with OnlineProfile.UpdateLivery (name, carId, numberOfLayers,
+# isLocked, creatorXuid, data: the compressed design), then ContentVersioning.CreateVersionedLivery (name,
+# carId, thumbnail) asks for a versioned copy of that same livery and gets its id, which travels with the car;
+# other consoles fetch it with RetrieveVersionedLiveryById (-> VersionedLiveryData: profileId, carId,
+# numberOfLayers, creatorXuid, data, thumbnails). Profile liveries are kept in data/profile_liveries/<xuid>/,
+# versioned ones in data/liveries/<id>.json. Garage cars whose design was made offline have
+# VersionedLiveryId -1 until the design is saved again online.
+LIVERIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'liveries')
+PROFILE_LIVERIES = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'profile_liveries')
+os.makedirs(LIVERIES, exist_ok=True)
+LIVERY_LOCK = threading.Lock()
+
+
+def profile_livery_path(xuid, car_id, name):
+    safe = ''.join(c for c in name if c.isalnum() or c in '_-')[:100]
+    return os.path.join(PROFILE_LIVERIES, str(xuid), f'{car_id}_{safe}.json')
+
+
+def update_livery(params, ctx):
+    path = profile_livery_path(ctx['xuid'], params['carId'], params['name'])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with LIVERY_LOCK, open(path, 'w', encoding='utf-8') as f:
+        json.dump(params, f)
+    print(f'profile livery from {ctx["xuid"]}: car {params["carId"]} "{params["name"]}", '
+          f'{params["numberOfLayers"]} layers, {len(params["data"]) // 2} bytes', flush=True)
+    return struct.pack('>III', 0, 0, 0)
+
+
+def create_versioned_livery(params, ctx):
+    with LIVERY_LOCK:
+        ids = [int(f.split('.')[0]) for f in os.listdir(LIVERIES) if f.split('.')[0].isdigit()]
+        lid = max(ids, default=1000) + 1
+        rec = {'id': lid, 'xuid': ctx['xuid'], 'params': params}
+        src = profile_livery_path(ctx['xuid'], params['carId'], params['name'])
+        if os.path.exists(src):   # the design itself, from the UpdateLivery just before
+            with open(src, encoding='utf-8') as f:
+                prof = json.load(f)
+            rec['data'], rec['layers'] = prof['data'], prof['numberOfLayers']
+        with open(os.path.join(LIVERIES, f'{lid}.json'), 'w', encoding='utf-8') as f:
+            json.dump(rec, f)
+    print(f'livery {lid} created by {ctx["xuid"]}: car {params.get("carId")} "{params.get("name")}", '
+          f'design {"found" if "data" in rec else "NOT found"}', flush=True)
+    return lsp_reply('ForzaContentVersioningCreateVersionedLivery_Results', {'versionedLiveryId': lid})
+
+
+def retrieve_versioned_livery(params, ctx):
+    lid = params['versionedLiveryId']
+    path = os.path.join(LIVERIES, f'{lid}.json')
+    if not os.path.exists(path):
+        print(f'livery {lid} asked for by {ctx["xuid"]}: not stored', flush=True)
+        return struct.pack('>III', 2, 1, 0)   # an error result
+    with open(path, encoding='utf-8') as f:
+        rec = json.load(f)
+    p = rec['params']
+    data = {'profileId': 0, 'carId': p.get('carId', 0), 'numberOfLayers': rec.get('layers', 0),
+            'creatorXuid': int(rec['xuid']), 'data': rec.get('data', ''),
+            'liveryThumbnail': p.get('LiveryThumbnail', '') if params.get('returnThumbnail') else '',
+            'liveryThumbnailSmall': ''}
+    print(f'livery {lid} sent to {ctx["xuid"]}', flush=True)
+    return lsp_reply('ForzaContentVersioningRetrieveVersionedLiveryById_Results', {'versionedLiveryData': data})
+
+
+# (X-ClassName, X-Method) -> (parameters type, handler(decoded params, ctx) -> reply body); ctx has the raw
+# body, where the parameters end in it, and the caller's xuid
 LSP = {
     ('Forza.WebServices.User, Forza.WebServices', 'Logon'): ('ForzaUserLogon_Parameters', logon),
+    ('Forza.WebServices.OnlineProfile, Forza.WebServices', 'UpdateLivery'):
+        ('ForzaWebServicesOnlineProfileUpdateLivery_Parameters', update_livery),
+    ('Forza.WebServices.ContentVersioning, Forza.WebServices', 'CreateVersionedLivery'):
+        ('ForzaContentVersioningCreateVersionedLivery_Parameters', create_versioned_livery),
+    ('Forza.WebServices.ContentVersioning, Forza.WebServices', 'RetrieveVersionedLiveryById'):
+        ('ForzaContentVersioningRetrieveVersionedLiveryById_Parameters', retrieve_versioned_livery),
 }
 
 
@@ -272,7 +346,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 params, end = xls.decode(schema.find(ptype), body)
                 rec['lsp_params'] = params
-                reply, status, ctype = fn(params), 200, 'bin/xtsw'
+                ctx = {'body': body, 'end': end, 'xuid': self.headers.get('X-Fh2net-Xuid', DEFAULT_XUID)}
+                reply, status, ctype = fn(params, ctx), 200, 'bin/xtsw'
                 rec['reply_hex'] = reply.hex()
             except Exception as e:
                 rec['lsp_error'] = repr(e)

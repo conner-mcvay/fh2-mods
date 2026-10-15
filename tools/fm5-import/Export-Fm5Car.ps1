@@ -26,8 +26,8 @@ param(
   [string]$Fm5Media = $env:FH2_FM5_MEDIA,   # FM5 Mount\media folder (car zip, sound banks, thumbnails, db\gamedb.slt)
   [string]$Fm5Db,                           # default: <Fm5Media>\db\gamedb.slt
   [string]$Mod,
-  [string]$Donor,                   # FH2 donor car: MediaName or Id. Supplies FH2-only Data_Car columns, Autoshow bucket,
-  [int]$DonorCarId,                 #   index metadata and (by default) the engine sound. Default: same make, nearest year
+  [string]$Donor,                   # FH2 donor car: MediaName or Id. Supplies FH2-only Data_Car columns, Autoshow bucket
+  [int]$DonorCarId,                 #   and (by default) the engine sound. Default: same make, nearest year
   [string]$EngineSound,             # FH2 engine MediaName whose sound the car's new engines use; default: the donor's
   [switch]$UseFm5Sound,             # try FM5's own engine banks (renamed PG_<engine>.bank) instead of an FH2 sound
   [string]$Thumbnail,               # Data_Car.Thumbnail override; default: the FM5 thumbnail, else the donor's
@@ -246,7 +246,7 @@ foreach ($en in $engines) {
   } else { $report += "SOUND   engine $en ($em): FH2 has no PG_$em.bank; pass -EngineSound to borrow one" }
 }
 
-# the car's stock wheel in the wheel shop for any car (tools\WheelSwap.ps1, as mods\stock-wheel-swap)
+# the car's stock wheel in the wheel shop for any car (tools\WheelSwap.ps1)
 $wheel = $null
 if (-not $NoWheelSwap) {
   . (Join-Path $PSScriptRoot 'WheelSwap.ps1')
@@ -273,19 +273,6 @@ $sqlPath = Join-Path $sqlDir "$CarId-$media.sql"
 [IO.File]::WriteAllText($sqlPath, $sb.ToString())
 # after the car's rows (name order): the wheel row comes with the car
 if ($wheel) { [IO.File]::WriteAllText((Join-Path $sqlDir "$CarId-$media.wheels.sql"), $wheel.Sql) }
-# Index donors: every new file needs a Mount\hash.manifest record whose 4-byte metadata is copied from a similar stock
-# file (meaning unknown; this is what the working GT500 import did). Use the donor car's own files.
-$donorBankPath = "audio\fmodanthem\durango\PG_$donorBank.bank"
-$donorXmlPath = if ($audioXml.ContainsKey($donor.ToLower())) { "audio\cars\$donor.xml" } else { $donorBankPath }
-$donorLines = foreach ($l in $importLines) {
-  $dest = ($l -split '\s*<-\s*')[0]
-  if ($dest -match '\.zip\\') { continue }   # entries added inside an existing zip need no record
-  $d = switch -Wildcard ($dest) { 'cars\*.zip' { "cars\$donor.zip" } '*.bank' { $donorBankPath } 'audio\cars\*.xml' { $donorXmlPath } default { throw "No index donor rule for $dest" } }
-  "$dest <- $d"
-}
-if ($wheel) { $donorLines = @($donorLines) + $wheel.Donors }
-[IO.File]::WriteAllText((Join-Path $modDir 'index-donors.txt'), "# <new media path> <- <stock media path whose hash.manifest metadata it copies>`r`n" + ($donorLines -join "`r`n") + "`r`n")
-
 [IO.File]::WriteAllText((Join-Path $modDir 'imports.txt'), "# <FH2 media path> <- <FM5 media path> (source: -Fm5Media / FH2_FM5_MEDIA); a .zip segment means an entry inside that zip`r`n" + ($importLines -join "`r`n") + "`r`n")
 
 $readmePath = Join-Path $modDir 'README.txt'
@@ -298,18 +285,16 @@ $('=' * $title.Length)
 Adds the Forza Motorsport 5 $media (car Id $CarId) to Forza Horizon 2 as a new
 car in the Autoshow.
 
-Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth 0.9.7.
+Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth with
+Extra Options 0.2.74 or later: the mod's files go into Mount\mediapc, which
+Extra Options makes the game read before Mount\media.
 
 Known limitations:
   - The car's name shows blank in menus
 
-This mod adds new files to the game, so it also replaces Mount\hash.manifest
-(Azimuth's file index) and patches azimuth.exe to accept it. The installer
-below does both and keeps your stock launcher.
-
-It replaces zipmanifest.xml, gamedbRC.slt, stripped\RC0.zip and
-hash.manifest, so it can't be installed on top of other mods that change
-those files. Build the mods together from the fh2-mods repo instead.
+It replaces zipmanifest.xml, gamedbRC.slt and stripped\RC0.zip, so it can't
+be installed on top of other mods that change those files. Build the mods
+together from the fh2-mods repo instead.
 "@)
 }
 

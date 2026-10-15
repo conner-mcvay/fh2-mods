@@ -5,8 +5,9 @@
 .DESCRIPTION
   Import-Fm5Cars does this for every car it imports. This is for cars imported before that (or by hand): it finds
   the imported cars in the game (FM5 cars stock FH2 doesn't have, per tools\build\stock-cars.txt) whose wheel isn't in the shop
-  yet, makes a wheel zip for each from FM5's car zip (converted for FH2's shaders), names, prices and files it like
-  mods\stock-wheel-swap, and installs it as one more layer (undo with the Uninstall.ps1 in its backup folder).
+  yet, makes a wheel zip for each from FM5's car zip (converted for FH2's shaders), names, prices and files it in
+  the wheel shop, and installs it as one more layer (undo with the Uninstall.ps1 in its backup folder). Extra Options'
+  stock rims cover FH2's own cars only; this is what puts imported cars' wheels on the list.
   Folders default to the ones Import-Fm5Cars remembered.
 
 .EXAMPLE
@@ -34,7 +35,8 @@ if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue
 if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
 if (-not $Sqlite) { throw 'Need sqlite3.exe: pass -Sqlite, put it on PATH, or run Import-Fm5Cars once (it downloads one)' }
 $fm5Media = Join-Path $Fm5Root 'Mount\media'
-$fhDb = (Join-Path $GameRoot 'Mount\media\stripped\gamedbRC.slt').Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
+. (Join-Path $tools '..\build\StockSource.ps1')   # Get-GameMediaFile: what the game reads (Mount\mediapc first)
+$fhDb = (Get-GameMediaFile $GameRoot 'stripped\gamedbRC.slt').FullName.Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
 function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sql
   $out = & $Sqlite -bail -list -separator '|' ':memory:' "ATTACH 'file:$fmDb`?immutable=1' AS fm;" "ATTACH 'file:$fhDb`?immutable=1' AS fh;" $sql
   if ($LASTEXITCODE -ne 0) { throw "sqlite3 failed: $sql" }
@@ -45,7 +47,7 @@ function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sq
 $stock = @{}; Get-Content (Join-Path $tools '..\build\stock-cars.txt') | Where-Object { $_ -and -not $_.StartsWith('#') } | ForEach-Object { $stock[$_.ToLower()] = 1 }
 $rows = Q "SELECT c.Id, c.MediaName, c.Year, w.MediaName, f.DisplayName FROM fh.Data_Car c JOIN fh.List_Wheels w ON w.ID = c.StockWheelID JOIN fm.Data_Car f ON f.MediaName = c.MediaName COLLATE NOCASE WHERE w.IsStock = 1 ORDER BY c.MediaName"
 $cars = @($rows | Where-Object {
-  if ($Car) { $Car -contains $_[1] } else { -not $stock.ContainsKey($_[1].ToLower()) -and (Test-Path (Join-Path $GameRoot "Mount\media\cars\$($_[1]).zip")) }
+  if ($Car) { $Car -contains $_[1] } else { -not $stock.ContainsKey($_[1].ToLower()) -and (Get-GameMediaFile $GameRoot "cars\$($_[1]).zip") }
 })
 if ($Car) { foreach ($c in $Car) { if (-not ($cars | Where-Object { $_[1] -ieq $c })) { throw "$c isn't in the game, isn't an FM5 car, or its wheel is already in the shop" } } }
 if (-not $cars.Count) { Write-Host 'No imported cars with wheels missing from the wheel shop.'; return }
@@ -54,7 +56,7 @@ $strings = Read-StringTable (Join-Path $fm5Media 'stringtables\EN.zip') 'Data_Ca
 $ws = Join-Path $root "build\.wheels-$Name"; if (Test-Path $ws) { Remove-Item -Recurse -Force $ws }
 $modDir = Join-Path $ws 'imported-car-wheels'; $sqlDir = Join-Path $modDir 'media\stripped\gamedbRC.slt'
 New-Item -ItemType Directory $sqlDir -Force | Out-Null
-$sql = @(); $imports = @(); $donors = @()
+$sql = @(); $imports = @()
 foreach ($r in $cars) {
   $id, $media, $year, $wheel, $dn = $r
   $za = [IO.Compression.ZipFile]::OpenRead((Join-Path $fm5Media "cars\$media.zip"))
@@ -62,12 +64,11 @@ foreach ($r in $cars) {
   if (-not $we) { Write-Warning "$media`: no wheel model in FM5's cars\$media.zip; skipped"; continue }
   $label = "$year $(Resolve-String $strings $dn)".Trim()
   $p = New-WheelSwapParts -Car $media -Wheel $wheel -Name $label -CarZip "cars\$media.zip" -SourcePrefix '' -Entries $we
-  $sql += $p.Sql; $imports += $p.Imports; $donors += $p.Donors
+  $sql += $p.Sql; $imports += $p.Imports
   Write-Host ("  {0,-30} wheel {1} -> '{2}'" -f $media, $wheel, $label)
 }
 [IO.File]::WriteAllText((Join-Path $sqlDir 'imported-car-wheels.sql'), ($sql -join "`r`n"))
 Set-Content (Join-Path $modDir 'imports.txt') $imports -Encoding ASCII
-Set-Content (Join-Path $modDir 'index-donors.txt') $donors -Encoding ASCII
 
 $env:FH2_MODS_ROOT = $ws
 try {

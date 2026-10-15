@@ -2,16 +2,18 @@
 
 Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.0.64_x64__8wekyb3d8bbwe`).
 
+Requires **Azimuth 0.9.9** and **[FH2 Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) 0.2.74 or later**. Mods install into `Mount\mediapc`, which Extra Options mounts over the game's media folder (`[Files] EnableMediaOverrides=1`). The game's own files, `hash.manifest` and `azimuth.exe` are never changed.
+
 | Mod | Description |
 |---|---|
 | [cockpit-fov](mods/cockpit-fov) | Cockpit/driver camera FOV 48 → 70 |
-| [dlc-unlock](mods/dlc-unlock) | DLC and bonus cars can be bought in the Autoshow without the Xbox Live license check |
-| [stock-wheel-swap](mods/stock-wheel-swap) | Every car's stock wheels can be fitted to any car, listed under the car's brand |
-| [photomode-unbound](mods/photomode-unbound) | Photo mode without its height cap, 100 m leash, ceiling/floor and collision, as a free camera |
+
+The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired: Extra Options 0.2.74 does the same things (DLC unlock, stock rims for every car, photo mode limits) without changing game files.
 
 | Tool | Description |
 |---|---|
 | [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`). Release package: `tools\release\Make-ImporterRelease.ps1 -Version <x.y.z>`; user docs in `release/fm5-car-importer` |
+| [fh2net](tools/online) | Experimental online free roam over a LAN or the internet through a server you run. Release package: `tools\release\Make-NetRelease.ps1 -Version <x.y.z>`; user docs in `release/fh2net` |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
 
 ## Layout
@@ -25,21 +27,22 @@ mods/<name>/
     stripped/gamedbRC.slt/<patch>.sql       a folder named like a .slt holds SQL patches, applied in name order
     <path>/<file>                           anything else is a loose file, copied as-is
   imports.txt                             files to copy in: "<FH2 media path> <- <FM5 media path>", or "<- fh2:<path>" to take one from the base game (a .zip segment = entry inside it; missing zips are created)
-  index-donors.txt                        for each new file, the stock file whose hash.manifest metadata it reuses
 tools/
   build/
     Build-Mod.ps1                         builds dist/<name>.zip from stock (or installed, -Layer) game files + one or more mods
-    StockSource.ps1                       reads base game files from the game package or a game folder
+    StockSource.ps1                       reads base game files from the game package or a game folder (mediapc first)
     Repack-ForzaZip.ps1                   repacks a media zip in FH2's native format and updates zipmanifest.xml
-    ForzaPathKey.cs                       the hash.manifest path key
     stock-hashes.json, stock-cars.txt     stock file hashes and car list (no game data)
-  azimuth/
-    Patch-Azimuth.ps1                     makes Azimuth 0.9.7 accept a given hash.manifest
   release/
     Install.ps1, Uninstall.ps1            bundled into every release zip
+    Make-ImporterRelease.ps1              packages the FM5 car importer
+    Make-NetRelease.ps1                   packages fh2net and its server
+  online/
+    probe/                                fh2net (the Azimuth DLL; build.ps1 builds it with Zig 0.13)
+    server/                               fh2srv.py, the game services + relay server
   fm5-import/
     Import-Fm5Cars.ps1                    the FM5 car importer (Import-Fm5Cars.cmd runs it)
-    Export-Fm5Car.ps1                     generates one FM5 car's import mod (SQL patch, imports, index donors, README)
+    Export-Fm5Car.ps1                     generates one FM5 car's import mod (SQL patch, imports, README)
     Add-ImportedCarWheels.ps1             puts already-imported cars' wheels in the wheel shop
     WheelSwap.ps1                         shared wheel-shop helper (brands, names, wheel zips)
     ForzaModel.cs                         .modelbin (burG) reader/writer + structure check
@@ -58,7 +61,7 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 
 ```powershell
 .\tools\build\Build-Mod.ps1 -Mod cockpit-fov -Package G:\FH2-1\Anthem_1.0.0.64_x64__8wekyb3d8bbwe.zip
-.\tools\build\Build-Mod.ps1 -Mod cockpit-fov,dlc-unlock -Name my-setup     # several mods in one install
+.\tools\build\Build-Mod.ps1 -Mod cockpit-fov,my-other-mod -Name my-setup     # several mods in one install
 ```
 
 - `-Package` can be set once via the `FH2_PACKAGE` environment variable.
@@ -66,27 +69,21 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 - Mods apply in the order given; on conflicts the later mod wins. Output goes to `dist/`.
 - Mods with FM5 sources in `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
 
-Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game and Azimuth versions, refuses to overwrite files that differ from the base unless `-Force`, backs up what it replaces, and patches `azimuth.exe` (stock, or already patched by another mod) when the mod ships a `hash.manifest`; the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
+Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game version and that Extra Options 0.2.74+ is installed in Azimuth, turns on `[Files] EnableMediaOverrides=1` in `FH2_ExtraOptions.ini`, puts every file under `Mount\mediapc`, refuses to overwrite files that differ from the base unless `-Force`, and backs up what it replaces (`mod-backups\<name>-<time>`); the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
 
-`Build-Mod.ps1 -Layer -Game <folder>` builds on top of what's installed in that game folder (earlier car imports, a modded gamedb) instead of stock files, so mods stack. Such a release installs only onto exactly that state.
+`Build-Mod.ps1 -Layer -Game <folder>` builds on top of what's installed in that game folder (`Mount\mediapc` first, then `Mount\media`: earlier car imports, a modded gamedb) instead of stock files, so mods stack. Such a release installs only onto exactly that state.
 
 ## Adding new files (imported cars)
 
-Azimuth only exposes files listed in `Mount\hash.manifest`, its file index. A new file that isn't listed is invisible to the game; a new car zip in `zipmanifest.xml` that the game can't open crashes it at startup. When a build adds files, it also writes `build\<name>\hash.manifest`: the stock index with one 12-byte record appended per new file.
+Azimuth only exposes files listed in `Mount\hash.manifest`, its file index, so new files in `Mount\media` are invisible to the game. Extra Options' media overrides don't have that limit: with `EnableMediaOverrides=1`, a file in `Mount\mediapc` (or `mediaoverride`) replaces or adds to `game:\media`, listed or not. New car zips still need their `zipmanifest.xml` entries (a car zip the game can't open crashes it at startup), so the build ships a full `zipmanifest.xml` into `mediapc` too.
 
-- Record: `u64` path key + `u32` metadata, little endian. The key is a DJB2-style mix run twice over the lowercase `media\...` path (see `tools/build/ForzaPathKey.cs`). It matches 2,312 of the 2,314 stock files, and the same function gives the same keys in FM5's own index.
-- The metadata's meaning is unknown. New files copy it from a similar stock file (`index-donors.txt`), as the working GT500 import did.
-- Azimuth 0.9.7 checks the index's exact size and SHA-256. `Patch-Azimuth.ps1` writes both into a copy of the launcher: the SHA-256 as ASCII hex at raw offset `0x252910`, the size as the `imm32` of `cmp qword [rbp-0x48]` at `0x1C06E8`. It accepts the stock launcher or one already patched this way (recognized by its SHA-256 with those two spots blanked). Keep the patched launcher named `azimuth.exe` (FH2_ExtraOptions checks the name). Restore the stock launcher together with the stock index.
+To remove every mod by hand, delete `Mount\mediapc`: the game's own `Mount\media` is untouched.
 
-The release's `Install.ps1` does this; by hand: install a build's `media\*` into `Mount\media`, its `hash.manifest` into `Mount`, then patch `azimuth.exe`:
-
-```powershell
-.\tools\azimuth\Patch-Azimuth.ps1 -Azimuth <azimuth folder>\azimuth.exe -Index <Mount\hash.manifest> -Out <azimuth folder>\azimuth.exe
-```
+Earlier releases (importer 1.x, for Azimuth 0.9.7) patched `hash.manifest` and `azimuth.exe` instead; uninstall those with the `Uninstall.ps1` in their `mod-backups` folder before switching.
 
 ## Importing FM5 cars
 
-**Double-click `Import-Fm5Cars.cmd`** (or run `tools\fm5-import\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) a **sound donor** (any FH2 car whose engine sound to use), and the **Autoshow group** to list it in (Retro Muscle, Modern Muscle, Super GT, ... from a numbered list; Enter keeps the data donor's; the group also decides which wheel-shop category the car's wheel goes in). Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb), and cars the game already has aren't offered. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 on Azimuth 0.9.7, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
+**Double-click `Import-Fm5Cars.cmd`** (or run `tools\fm5-import\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) a **sound donor** (any FH2 car whose engine sound to use), and the **Autoshow group** to list it in (Retro Muscle, Modern Muscle, Super GT, ... from a numbered list; Enter keeps the data donor's; the group also decides which wheel-shop category the car's wheel goes in). Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb), and cars the game already has aren't offered. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 on Azimuth 0.9.9 with Extra Options 0.2.74+, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
 
 ```powershell
 # which FM5 cars FH2 doesn't have
@@ -100,7 +97,7 @@ The release's `Install.ps1` does this; by hand: install a build's `media\*` into
 
 It checks the game version, generates each car's mod in a private workspace, builds one install on top of your current game files (models converted for FH2's shaders), and installs it with backups. Each run gets its own backup folder (`mod-backups\fm5-cars-<time>`, with the run's car list in `cars.json`); undo a run with the `Uninstall.ps1` kept there, newest run first. `-NoInstall` builds only.
 
-Each imported car's stock wheel is also put in the wheel shop for any car, like [stock-wheel-swap](mods/stock-wheel-swap) does for FH2's cars (its own wheel zip, converted from FM5, named from FM5's string table; `tools\fm5-import\WheelSwap.ps1`). `-NoWheelSwap` on `Export-Fm5Car.ps1` skips it. For cars imported before this, run `tools\fm5-import\Add-ImportedCarWheels.ps1`: it finds imported cars (FM5 cars not in `tools\build\stock-cars.txt`) whose wheel isn't in the shop and installs their wheels as one more layer.
+Each imported car's stock wheel is also put in the wheel shop for any car, as Extra Options' stock rims do for FH2's own cars (its own wheel zip, converted from FM5, named from FM5's string table; `tools\fm5-import\WheelSwap.ps1`). `-NoWheelSwap` on `Export-Fm5Car.ps1` skips it. For cars imported before this, run `tools\fm5-import\Add-ImportedCarWheels.ps1`: it finds imported cars (FM5 cars not in `tools\build\stock-cars.txt`) whose wheel isn't in the shop and installs their wheels as one more layer.
 
 ### Night lights (experimental)
 
@@ -123,7 +120,7 @@ For a car you want to ship from the repo as its own mod (the importer is the usu
 .\tools\fm5-import\Export-Fm5Car.ps1 -CarId 1065 -Fm5Media G:\FM5\Forza_1.0.0.20_x64__8wekyb3d8bbwe\Mount\media
 ```
 
-The exporter walks every gamedb row the car depends on and writes them as INSERTs. It never overwrites an FH2 row; it reports key conflicts instead. Shared engines/drivetrains/bodies only get part rows FH2 has none of. It also lists the FM5 files to import and their index donors. What carries over: the car zip (including the v13 `physicsdefinition.bin`), the audio tuning XML, and the thumbnail (added into `stripped\RC0.zip`). Engine sound: pass `-EngineSound <FH2 engine>` to borrow an FH2 bank (FM5's `<engine>.bank` renamed to `PG_<engine>.bank` was silent for the Trans Am). FH2-only `Data_Car` columns and the `Data_Car_Buckets` row come from a donor FH2 car (default: same make, closest year).
+The exporter walks every gamedb row the car depends on and writes them as INSERTs. It never overwrites an FH2 row; it reports key conflicts instead. Shared engines/drivetrains/bodies only get part rows FH2 has none of. It also lists the FM5 files to import. What carries over: the car zip (including the v13 `physicsdefinition.bin`), the audio tuning XML, and the thumbnail (added into `stripped\RC0.zip`). Engine sound: pass `-EngineSound <FH2 engine>` to borrow an FH2 bank (FM5's `<engine>.bank` renamed to `PG_<engine>.bank` was silent for the Trans Am). FH2-only `Data_Car` columns and the `Data_Car_Buckets` row come from a donor FH2 car (default: same make, closest year).
 
 ### Model conversion (automatic in the build)
 

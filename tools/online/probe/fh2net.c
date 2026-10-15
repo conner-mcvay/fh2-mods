@@ -460,6 +460,11 @@ static HRESULT STDMETHODCALLTYPE s_tok(void *t, void *m, void *u, void *h, void 
 static HRESULT STDMETHODCALLTYPE s_tokArr(void *t, void *m, void *u, void *h, UINT32 n, void *b, void **out) { (void)t; (void)h; (void)n; (void)b; return token_op("User.GetTokenAndSignatureForAllUsersAsync(body)", m, u, out); }
 static HRESULT STDMETHODCALLTYPE s_tokBuf(void *t, void *m, void *u, void *h, void *b, void **out) { (void)t; (void)h; (void)b; return token_op("User.GetTokenAndSignatureForAllUsersAsync(buffer)", m, u, out); }
 
+// An Azimuth build: its LocalUser / LocalUserStatics vtables and the token functions expected in their slots
+// 16-18 / 15-17, and where its user id (0x9000000000000) is formatted into the XboxUserId string.
+typedef struct { const char *name; DWORD userTable, staticsTable; DWORD userToken[3], staticsToken[3]; DWORD xuidRva; } AzimuthLayout;
+static const AzimuthLayout *azimuth_layout(void);
+
 #include "qos.c"
 #include "json.c"
 #include "proxy.c"
@@ -468,27 +473,47 @@ static HRESULT STDMETHODCALLTYPE s_tokBuf(void *t, void *m, void *u, void *h, vo
 #include "assoc.c"
 #include "patches.c"
 
-// Azimuth 0.9.7's vtables (RVAs in azimuth.exe), checked slot by slot before patching.
-typedef struct { DWORD table; int slot; DWORD expect; void *fn; } VtPatch;
-static const VtPatch g_tokenPatches[] = {
-  { 0x24FF10, 16, 0x239B0, u_tok }, { 0x24FF10, 17, 0x239D0, u_tokArr }, { 0x24FF10, 18, 0x23A20, u_tokBuf },
-  { 0x250218, 15, 0x23EE0, s_tok }, { 0x250218, 16, 0x23F00, s_tokArr }, { 0x250218, 17, 0x23F50, s_tokBuf },
+// The Azimuth builds fh2net knows (RVAs in azimuth.exe). A build is recognized by its LocalUser and
+// LocalUserStatics vtables holding the expected token functions in the slots fh2net replaces; nothing is patched
+// in a build that matches none.
+static const AzimuthLayout g_azimuthLayouts[] = {
+  { "0.9.7", 0x24FF10, 0x250218, { 0x239B0, 0x239D0, 0x23A20 }, { 0x23EE0, 0x23F00, 0x23F50 }, 0x23855 },
+  { "0.9.9", 0x29D718, 0x29D460, { 0x40BF0, 0x40C10, 0x40C60 }, { 0x41150, 0x41170, 0x411C0 }, 0x40A95 },
 };
+
+// LocalUser slots 16-18 and LocalUserStatics slots 15-17: GetTokenAndSignatureAsync and its ...ForAllUsers
+// forms (body as string, as array, as buffer).
+static void *const g_userTokenFns[3] = { u_tok, u_tokArr, u_tokBuf };
+static void *const g_staticsTokenFns[3] = { s_tok, s_tokArr, s_tokBuf };
+
+static const AzimuthLayout *azimuth_layout(void) {
+  static const AzimuthLayout *found; static int looked;
+  if (looked) return found;
+  looked = 1;
+  BYTE *az = (BYTE *)GetModuleHandleW(NULL);
+  for (size_t k = 0; k < sizeof g_azimuthLayouts / sizeof *g_azimuthLayouts; k++) {
+    const AzimuthLayout *l = &g_azimuthLayouts[k];
+    void **user = (void **)(az + l->userTable) + 16, **stat = (void **)(az + l->staticsTable) + 15;
+    if (!readable(user, 3 * 8) || !readable(stat, 3 * 8)) continue;
+    int ok = 1;
+    for (int i = 0; i < 3; i++) ok &= user[i] == az + l->userToken[i] && stat[i] == az + l->staticsToken[i];
+    if (ok) { found = l; logf("Azimuth %s recognized", l->name); return found; }
+  }
+  logf("Azimuth build not recognized: token hooks and Xuid can't be applied");
+  return NULL;
+}
 
 static void install_token_hooks(void) {
   p_WindowsCreateString = iat_lookup(GAME_BASE, "combase.dll", "WindowsCreateString");
   p_WindowsGetStringRawBuffer = iat_lookup(GAME_BASE, "combase.dll", "WindowsGetStringRawBuffer");
   if (!p_WindowsCreateString || !p_WindowsGetStringRawBuffer) { logf("token hooks: the game's HSTRING functions weren't found"); return; }
+  const AzimuthLayout *l = azimuth_layout();
+  if (!l) return;
   BYTE *az = (BYTE *)GetModuleHandleW(NULL);
-  size_t n = sizeof g_tokenPatches / sizeof *g_tokenPatches;
-  for (size_t i = 0; i < n; i++) {
-    void **slot = (void **)(az + g_tokenPatches[i].table) + g_tokenPatches[i].slot;
-    if (*slot != az + g_tokenPatches[i].expect) { logf("token hooks: not Azimuth 0.9.7's layout (table %X slot %d is %p); none installed", g_tokenPatches[i].table, g_tokenPatches[i].slot, *slot); return; }
-  }
-  for (size_t i = 0; i < n; i++) {
-    void **slot = (void **)(az + g_tokenPatches[i].table) + g_tokenPatches[i].slot;
+  for (int i = 0; i < 6; i++) {
+    void **slot = i < 3 ? (void **)(az + l->userTable) + 16 + i : (void **)(az + l->staticsTable) + 15 + (i - 3);
     DWORD old; VirtualProtect(slot, 8, PAGE_READWRITE, &old);
-    *slot = g_tokenPatches[i].fn;
+    *slot = i < 3 ? g_userTokenFns[i] : g_staticsTokenFns[i - 3];
     VirtualProtect(slot, 8, old, &old);
   }
   logf("token hooks installed (token \"%ls\")", g_token);

@@ -1,0 +1,2 @@
+# no presses: with a script set, fh2net reports controller 0 as connected even when none is plugged in,
+# so a game without a controller doesn't pause

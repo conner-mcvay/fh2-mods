@@ -19,7 +19,7 @@
 1. **Unblock the zip** before extracting: right-click the downloaded zip > *Properties* > tick **Unblock** > *OK*. (Windows marks downloaded files; unblocking avoids security prompts for each script.)
 2. **Extract** it to a folder you'll keep, e.g. `C:\FH2-Mods\fm5-car-importer`. Don't run it from inside the zip.
 3. Have ready:
-   - your **Azimuth** folder (the one with `azimuth.exe`, version 0.9.7)
+   - your **Azimuth** folder (the one with `azimuth.exe`, version 0.9.9), with **FH2 Extra Options 0.2.74 or later** installed in its `data\bin` (the importer turns on Extra Options' `[Files] EnableMediaOverrides=1`, which makes the game read `Mount\mediapc`)
    - your **FH2** game folder (the one with `Mount\forza_durango_release_final.exe`, FH2 1.0.0.64)
    - your **FM5** game folder (the one with `Mount\media\db\gamedb.slt`, FM5 1.0.0.20)
 
@@ -96,17 +96,18 @@ Good pairs found so far:
 
 ## 4. What happens to your game
 
-For each run, in your FH2 folder:
+Everything goes into `<FH2 folder>\Mount\mediapc`, which Extra Options mounts over the game's media folder. The game's own `Mount\media`, `Mount\hash.manifest` and `azimuth.exe` are never changed. For each run:
 
-| Changed | How |
+| In `Mount\mediapc` | How |
 |---|---|
-| `Mount\media\stripped\gamedbRC.slt` | the cars' rows (car, engines, upgrades, Autoshow group, wheel) are added; nothing existing is changed |
-| `Mount\media\cars\<car>.zip` | new: the FM5 car, converted for FH2's shaders |
-| `Mount\media\cars\_library\scene\wheels\<wheel>.zip` | new: the car's wheel for the wheel shop |
-| `Mount\media\stripped\RC0.zip` | the car's thumbnail, when FM5 has one |
-| `Mount\media\zipmanifest.xml` | entries for the new and changed archives |
-| `Mount\hash.manifest` | Azimuth's file index, with the new files added (otherwise the game can't see them) |
-| `azimuth.exe` | patched to accept the new index (any Azimuth 0.9.7, stock or already patched) |
+| `stripped\gamedbRC.slt` | the game database with the cars' rows (car, engines, upgrades, Autoshow group, wheel) added; nothing existing is changed |
+| `cars\<car>.zip` | new: the FM5 car, converted for FH2's shaders |
+| `cars\_library\scene\wheels\<wheel>.zip` | new: the car's wheel for the wheel shop |
+| `stripped\RC0.zip` | the car's thumbnail, when FM5 has one |
+| `zipmanifest.xml` | the game's archive list with entries for the new and changed archives |
+| `audio\cars\<car>.xml` | the car's engine sound settings |
+
+In Azimuth's `data\bin\FH2_ExtraOptions.ini`, `[Files] EnableMediaOverrides` is set to 1 (the old ini is backed up next to it).
 
 Every replaced file is backed up first, to `<FH2 folder>\mod-backups\<layer>-<date-time>\`, together with a `restore.json` and an `Uninstall.ps1`. Nothing else on your PC is touched, and FM5 is only read.
 
@@ -127,7 +128,9 @@ fm5-cars-lights-20261013-221300   their night lights
 powershell -NoProfile -ExecutionPolicy Bypass -File "<FH2 folder>\mod-backups\fm5-cars-lights-20261013-221300\Uninstall.ps1" -BackupRoot "<FH2 folder>\mod-backups\fm5-cars-lights-20261013-221300"
 ```
 
-The uninstaller restores the backed-up files and `azimuth.exe`, deletes the files the layer added, and marks the backup as used (`uninstalled.txt`). If a newer layer changed the same files it refuses ("Changed since installation ... uninstall mods newest first"): undo that newer layer first.
+To remove **every** import at once, close the game and delete `<FH2 folder>\Mount\mediapc` (and the `mod-backups\fm5-cars*` folders, which no longer apply).
+
+The uninstaller restores the backed-up files, deletes the files the layer added, and marks the backup as used (`uninstalled.txt`). If a newer layer changed the same files it refuses ("Changed since installation ... uninstall mods newest first"): undo that newer layer first.
 
 To remove a car that isn't in the newest layer, undo layers back to it, then re-import the cars you want to keep.
 
@@ -210,7 +213,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 | `Close Azimuth first.` | Quit the game and Azimuth, then run again. |
 | `Can't read Mount\...; close the game first.` | Same: the game has the file open. |
 | `Unsupported game version` / `Unsupported game: needs FH2 1.0.0.64` | Only FH2 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`) is supported. |
-| `Needs the Azimuth 0.9.7 launcher (stock, or patched by another mod)` / `Not an Azimuth 0.9.7 launcher` | Use Azimuth 0.9.7's `azimuth.exe` (stock or patched by these tools). Other versions check the file index differently. |
+| `Needs Extra Options 0.2.74 or later in ...` | Install FH2 Extra Options 0.2.74+ into Azimuth's `data\bin` (as `azimuth-tls.dll`; with fh2net installed it is `azimuth-tls-next.dll`). Older versions can't load `Mount\mediapc`. |
+| Imported cars are missing in the game | Check `FH2_ExtraOptions.ini` in Azimuth's `data\bin` has `EnableMediaOverrides=1` under `[Files]`, and that you start the game through that Azimuth. |
+| `This package was made for an older installer` | A 1.x package (it patched `azimuth.exe`). Build it again with 2.0. |
+| Upgrading from 1.x | 1.x put files in `Mount\media` and patched `Mount\hash.manifest` and `azimuth.exe`. Undo the 1.x layers with their `Uninstall.ps1` (newest first), or restore those files from a clean copy of the game, then re-import with 2.0 on Azimuth 0.9.9. |
 | `sqlite download failed its hash check` | The download was blocked or changed. Download `sqlite-tools-win-x64-3470200.zip` from sqlite.org yourself, put `sqlite3.exe` in `tools\bin`, and run again. |
 | `FM5 car ... not found, or FH2 already has it` | Check the name with `-ListFm5Only`. Cars already in FH2 (stock or imported) can't be imported again. |
 | `Donor ... has no engine sound bank` | Pick a different sound donor. |
@@ -235,7 +241,7 @@ Other limitations:
 
 - Engine sounds are **borrowed** from an FH2 car.
 - Wheel-shop thumbnails for imported wheels are blank.
-- Only FM5 1.0.0.20 and FH2 1.0.0.64 on Azimuth 0.9.7 are supported.
+- Only FM5 1.0.0.20 and FH2 1.0.0.64 on Azimuth 0.9.9 with Extra Options 0.2.74+ are supported.
 - FM5-only interior or livery features that FH2 doesn't have aren't carried over.
 
 ## 11. What's in this package
@@ -251,9 +257,8 @@ tools\
     Add-ImportedCarWheels.ps1   wheels for older imports
     WheelSwap.ps1, CarLights.cs, ForzaModel.cs, Fm5ModelConverter.cs
   build\                      builds an installable layer from the generated mods
-    Build-Mod.ps1, StockSource.ps1, Repack-ForzaZip.ps1, ForzaPathKey.cs
+    Build-Mod.ps1, StockSource.ps1, Repack-ForzaZip.ps1
     stock-hashes.json, stock-cars.txt   checksums and the stock car list (no game data)
-  azimuth\Patch-Azimuth.ps1   lets azimuth.exe accept the extended file index
   release\Install.ps1, Uninstall.ps1    the installer/uninstaller each layer uses
   bin\                        sqlite3.exe goes here (downloaded on first use)
 build\                        created while importing (working files; safe to delete between runs)

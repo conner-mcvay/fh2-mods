@@ -1,0 +1,41 @@
+# fh2net: join online free roam, then drive in circles forever (for testing with one controller).
+# The waits fit the main PC; on a slower machine, lengthen the first two (the boot and the load into free roam).
+wait 4000
+press A
+wait 25000
+press B
+wait 1500
+press A
+wait 7000
+press START
+wait 1200
+press RB
+wait 800
+press RIGHT
+press RIGHT
+press RIGHT
+press DOWN
+press A
+wait 1200
+press DOWN
+press A
+wait 4000
+# Select: join the free roam session, then wait out the joining and the welcome cutscene
+press BACK
+wait 30000
+# back off whatever the car spawned against
+trigger L 200
+wait 2000
+trigger L 0
+label
+# a wide right-hand circle at part throttle
+trigger R 150
+stick LX 14000
+wait 12000
+# reverse with the wheel the other way, in case it hit something
+trigger R 0
+stick LX -14000
+trigger L 200
+wait 2500
+trigger L 0
+loop

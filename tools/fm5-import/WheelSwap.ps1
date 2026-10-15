@@ -1,4 +1,4 @@
-# Puts a car's stock wheel in the wheel shop, like mods\stock-wheel-swap does for FH2's own cars. Dot-source, then
+# Puts an imported car's stock wheel in the wheel shop (Extra Options does that for FH2's own cars). Dot-source, then
 # New-WheelSwapParts per car. The shop loads non-stock wheels from cars\_library\scene\wheels\<wheel>.zip
 # (<wheel>_wheelLF.modelbin + Textures\AO\<wheel>_wheelLF_AO.swatchbin) and lists only wheels with a
 # WheelAnnotations row; stock wheels only exist inside their car's zip.
@@ -47,7 +47,7 @@ function Find-CarWheelEntries([IO.Compression.ZipArchive]$archive, [string]$whee
 }
 
 function New-WheelSwapParts([string]$Car, [string]$Wheel, [string]$Name, [string]$CarZip, [string]$SourcePrefix, [hashtable]$Entries) {
-  # SQL, imports.txt and index-donors.txt lines that put $Car's stock wheel $Wheel in the shop.
+  # SQL and imports.txt lines that put $Car's stock wheel $Wheel in the shop.
   # $CarZip: the car zip's media path in the source ("cars\X.zip"); $SourcePrefix: "" for FM5 (converted for FH2's
   # shaders by the build), "fh2:" for the base game; $Entries: from Find-CarWheelEntries.
   $dest = "cars\_library\scene\wheels\$Wheel.zip"
@@ -55,7 +55,7 @@ function New-WheelSwapParts([string]$Car, [string]$Wheel, [string]$Name, [string
   if ($Entries.Ao) { $imports += "$dest\Textures\AO\$($Wheel)_wheelLF_AO.swatchbin <- $SourcePrefix$CarZip\$($Entries.Ao)" }
   $w = $Wheel.Replace("'", "''"); $c = $Car.Replace("'", "''")
   $sql = @"
--- $Car's stock wheel in the wheel shop (as mods\stock-wheel-swap): brand, name, price by weight, a shop category by
+-- $Car's stock wheel in the wheel shop: brand, name, price by weight, a shop category by
 -- the car's Autoshow group (2 Sport, 3 forged, 4 Specialized)
 UPDATE List_Wheels SET IsStock = 0, DisplayName = '$($Name.Replace("'", "''"))', PartManufacturerID = $(Get-WheelBrand $Wheel),
   Price = CASE WHEN Mass < 30.0 THEN 3800 WHEN Mass <= 30.0 THEN 3700 WHEN Mass <= 33.5 THEN 3600 WHEN Mass <= 38.0 THEN 3500
@@ -74,5 +74,5 @@ FROM List_Wheels w, (
   WHERE c.MediaName = '$c' COLLATE NOCASE) x
 WHERE w.MediaName = '$w' COLLATE NOCASE AND w.ID NOT IN (SELECT WheelID FROM WheelAnnotations);
 "@
-  @{ Sql = $sql; Imports = $imports; Donors = @("$dest <- cars\_library\scene\wheels\VOL_TE37.zip") }
+  @{ Sql = $sql; Imports = $imports }
 }

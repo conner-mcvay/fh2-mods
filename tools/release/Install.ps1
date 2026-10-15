@@ -3,11 +3,15 @@
   Installs this mod into a Forza Horizon 2 (PC / Azimuth) game folder, with backups.
 
 .DESCRIPTION
-  Reads install.json next to this script. Checks the game and Azimuth versions, refuses to overwrite files another
-  mod already changed (unless -Force; a layered package expects exactly the files it was built on), backs up every
-  file it replaces, copies the mod's files in, and - when the mod adds files the game doesn't have - patches
-  azimuth.exe to accept the mod's Mount\hash.manifest. Prints the backup folder; pass it to Uninstall.ps1 to undo
-  (with several mods installed, newest first).
+  Reads install.json next to this script. The mod's files go into Mount\mediapc, Extra Options' override folder:
+  the game reads it before Mount\media and doesn't filter it by Mount\hash.manifest, so the game's own files and
+  azimuth.exe stay untouched. Needs Extra Options 0.2.74 or later in Azimuth's data\bin; turns its
+  [Files] EnableMediaOverrides on if it's off.
+
+  Checks the game version, refuses to overwrite files another mod already put in Mount\mediapc (unless -Force; a
+  layered package expects exactly the files it was built on), backs up every file it replaces, and copies the
+  mod's files in. Prints the backup folder; pass it to Uninstall.ps1 to undo (with several mods installed, newest
+  first).
 
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "D:\Anthem_1.0.0.64_x64__8wekyb3d8bbwe" -AzimuthRoot "D:\azimuth"
@@ -16,7 +20,7 @@
 param(
   [Parameter(Mandatory)][string]$GameRoot,      # folder containing Mount
   [Parameter(Mandatory)][string]$AzimuthRoot,   # folder containing azimuth.exe
-  [switch]$Force                                # overwrite files that aren't stock (e.g. changed by another mod)
+  [switch]$Force                                # overwrite files another mod put in Mount\mediapc
 )
 $ErrorActionPreference = 'Stop'
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -28,37 +32,34 @@ $mount = Join-Path $GameRoot 'Mount'
 $exe = Join-Path $mount 'forza_durango_release_final.exe'
 if (-not (Test-Path -LiteralPath $exe) -or (Sha $exe) -ne $m.game_exe_sha256) { throw "Unsupported game: needs FH2 $($m.game_version) (Mount\forza_durango_release_final.exe SHA-256 $($m.game_exe_sha256))" }
 if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($AzimuthRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Close Azimuth first.' }
+if ($m.install_folder -ne 'mediapc') { throw 'This package was made for an older installer (it patches azimuth.exe); build it again with the current fh2-mods tools.' }
+
+# Extra Options with the override folders (0.2.74+): its DLL is data\bin\azimuth-tls.dll, or azimuth-tls-next.dll
+# when another DLL (e.g. fh2net) sits in front of it
+$bin = Join-Path $AzimuthRoot 'data\bin'
+$eo = @('azimuth-tls.dll', 'azimuth-tls-next.dll' | ForEach-Object { Join-Path $bin $_ } | Where-Object {
+  (Test-Path -LiteralPath $_) -and [IO.File]::ReadAllText($_, [Text.Encoding]::ASCII).Contains('game:\mediapc\')
+})
+if (-not $eo) { throw "Needs Extra Options 0.2.74 or later in $bin (it makes the game read mods from Mount\mediapc)." }
+$ini = Join-Path $bin 'FH2_ExtraOptions.ini'
+$iniText = if (Test-Path -LiteralPath $ini) { [IO.File]::ReadAllText($ini) } else { '' }
+$iniOn = [regex]::IsMatch($iniText, '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$')
 
 # payload integrity
 foreach ($f in $m.files) { if ((Sha (Join-Path $pkg $f.source)) -ne $f.sha256) { throw "Corrupt package file: $($f.source)" } }
 
-# targets must be what the package was built on (stock, or for a layered build the files installed then;
-# absent for new files) unless -Force
+# targets must hold what the package was built on: nothing for a new file, or for a layered build the files
+# earlier mods installed then (unless -Force)
 $conflicts = @()
 foreach ($f in $m.files) {
+  if ($f.target -notmatch '^mediapc\\' -or $f.target -match '(^|\\)\.\.(\\|$)') { throw "Bad target in install.json: $($f.target)" }
   $t = Join-Path $mount $f.target
-  $base = if ($f.PSObject.Properties['base_sha256']) { $f.base_sha256 } else { $f.stock_sha256 }
-  if ($base) { if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $base) { $conflicts += $f.target } }
+  if ($f.base_sha256) { if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $f.base_sha256) { $conflicts += $f.target } }
   elseif (Test-Path -LiteralPath $t) { $conflicts += $f.target }
 }
 if ($conflicts.Count -and -not $Force) {
-  if ($m.layered) { throw ("These game files changed since this package was built on top of them (installing would undo that):`n  " + ($conflicts -join "`n  ") + "`nBuild it again, or pass -Force.") }
-  throw ("These files aren't stock (another mod may have changed them; installing would undo it):`n  " + ($conflicts -join "`n  ") + "`nUninstall that mod first, build the mods together from the fh2-mods repo, or pass -Force.")
-}
-
-# azimuth: needs patching only when the mod ships a hash.manifest. Any 0.9.7 launcher works, stock or patched by
-# an earlier mod; the patched copy is prepared now so nothing changes if that fails
-$azExe = Join-Path $AzimuthRoot 'azimuth.exe'; $azStock = Join-Path $AzimuthRoot 'azimuth.stock.exe'
-$index = $m.files | Where-Object { $_.target -eq 'hash.manifest' }
-$azNew = $null
-if ($index) {
-  if (-not (Test-Path -LiteralPath $azExe)) { throw "azimuth.exe not found in $AzimuthRoot" }
-  $azNew = Join-Path ([IO.Path]::GetTempPath()) ("azimuth-" + [IO.Path]::GetRandomFileName() + '.exe')
-  foreach ($src in $azExe, $azStock) {   # azimuth.stock.exe: kept by earlier versions of this installer
-    if (-not (Test-Path -LiteralPath $src)) { continue }
-    try { & (Join-Path $pkg 'tools\Patch-Azimuth.ps1') -Azimuth $src -Index (Join-Path $pkg $index.source) -Out $azNew 6>$null | Out-Null; break } catch { }
-  }
-  if (-not (Test-Path -LiteralPath $azNew)) { throw "Needs the Azimuth $($m.azimuth_version) launcher (stock, or patched by another mod); $azExe is a different build" }
+  if ($m.layered) { throw ("These files changed since this package was built on top of them (installing would undo that):`n  " + ($conflicts -join "`n  ") + "`nBuild it again, or pass -Force.") }
+  throw ("Another mod already put these files in Mount\mediapc (installing would undo it):`n  " + ($conflicts -join "`n  ") + "`nUninstall that mod first, build the mods together from the fh2-mods repo, or pass -Force.")
 }
 
 # back up, then install
@@ -74,14 +75,15 @@ try {
     Copy-Item -LiteralPath (Join-Path $pkg $f.source) -Destination $t -Force
     if ((Sha $t) -ne $f.sha256) { throw "Install verification failed: $($f.target)" }
   }
-  $az = $null
-  if ($index) {
-    Copy-Item -LiteralPath $azExe -Destination (Join-Path $backup 'azimuth.exe')
-    Copy-Item -LiteralPath $azNew -Destination $azExe -Force
-    Write-Host "Patched azimuth.exe for the new Mount\hash.manifest"
-    $az = [pscustomobject]@{ backup = 'azimuth.exe'; backup_sha256 = (Sha (Join-Path $backup 'azimuth.exe')); installed_sha256 = (Sha $azExe) }
+  if (-not $iniOn) {   # Extra Options reads the override folders only with [Files] EnableMediaOverrides=1
+    if (Test-Path -LiteralPath $ini) { Copy-Item -LiteralPath $ini -Destination (Join-Path $backup 'FH2_ExtraOptions.ini') }
+    if ([regex]::IsMatch($iniText, '(?m)^\s*EnableMediaOverrides\s*=')) { $iniText = [regex]::Replace($iniText, '(?m)^(\s*EnableMediaOverrides\s*=\s*)\S*', '${1}1') }
+    elseif ([regex]::IsMatch($iniText, '(?m)^\s*\[Files\]')) { $iniText = [regex]::Replace($iniText, '(?m)^(\s*\[Files\][^\r\n]*\r?\n)', "`${1}EnableMediaOverrides=1`r`n") }
+    else { $iniText = $iniText.TrimEnd() + "`r`n`r`n[Files]`r`n; Mount\mediaoverride and Mount\mediapc override game:\media (mods install into mediapc)`r`nEnableMediaOverrides=1`r`n" }
+    [IO.File]::WriteAllText($ini, $iniText, (New-Object Text.UTF8Encoding $false))
+    Write-Host "Turned on Extra Options' EnableMediaOverrides ($ini)"
   }
-  [pscustomobject]@{ mod = $m.name; game_root = $GameRoot; azimuth_root = $AzimuthRoot; files = $record; azimuth = $az } |
+  [pscustomobject]@{ mod = $m.name; game_root = $GameRoot; azimuth_root = $AzimuthRoot; files = $record } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $backup 'restore.json') -Encoding UTF8
   Copy-Item -LiteralPath (Join-Path $pkg 'Uninstall.ps1') -Destination $backup   # undo works without this package
 } catch {
@@ -90,9 +92,8 @@ try {
     $t = Join-Path $mount $r.target
     if ($r.existed) { Copy-Item -LiteralPath (Join-Path $backup ('files\' + $r.target)) -Destination $t -Force } elseif (Test-Path -LiteralPath $t) { Remove-Item -LiteralPath $t }
   }
-  if (Test-Path -LiteralPath (Join-Path $backup 'azimuth.exe')) { Copy-Item -LiteralPath (Join-Path $backup 'azimuth.exe') -Destination $azExe -Force }
   throw
-} finally { if ($azNew -and (Test-Path -LiteralPath $azNew)) { Remove-Item -LiteralPath $azNew } }
-Write-Output "Installed $($m.name)."
+}
+Write-Output "Installed $($m.name) into $(Join-Path $mount 'mediapc')."
 Write-Output "Backup: $backup"
 Write-Output "To undo: powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot `"$backup`""

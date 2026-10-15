@@ -19,19 +19,21 @@ static int patch_bytes(BYTE *at, const BYTE *orig, const BYTE *repl, SIZE_T n, c
   return 1;
 }
 
-// [xbl] Xuid=<decimal>: the player's Xbox user id. Azimuth 0.9.7 has it as a constant (0x9000000000000 =
-// 2533274790395904); consoles playing together each need their own. Only the XboxUserId string (movabs r8
-// at RVA 23855) is patched: the other use (RVA 131D25) names the save container (User_%llX), and changing
-// it would start a new save.
+// [xbl] Xuid=<decimal>: the player's Xbox user id. Azimuth has it as a constant (0x9000000000000 =
+// 2533274790395904); consoles playing together each need their own. Only the XboxUserId string (a movabs r8
+// at the layout's xuidRva) is patched: Azimuth also names the save container from the id (User_%llX), so a
+// console with another id has its own save (copy one into data\...\User_<hex id> to keep progress).
 static void xuid_patch(void) {
   wchar_t s[32]; GetPrivateProfileStringW(L"xbl", L"Xuid", L"", s, 32, g_ini);
   if (!s[0]) return;
+  const AzimuthLayout *l = azimuth_layout();
+  if (!l) return;
   ULONG64 x = wcstoull(s, NULL, 10);
   BYTE *az = (BYTE *)GetModuleHandleW(NULL);
   BYTE orig[10] = { 0x49, 0xB8 }, repl[10] = { 0x49, 0xB8 };
   ULONG64 azx = 0x9000000000000ULL;
   memcpy(orig + 2, &azx, 8); memcpy(repl + 2, &x, 8);
-  patch_bytes(az + 0x23855, orig, repl, 10, "Xuid");
+  patch_bytes(az + l->xuidRva, orig, repl, 10, "Xuid");
   logf("xuid %llu", x);
 }
 

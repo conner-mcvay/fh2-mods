@@ -51,7 +51,7 @@ foreach ($pn in 'HeadlightStyle', 'PresetFrom', 'HeadlightColor') { $pv = Get-Va
 if ($GraphFrom -and $GraphFrom.Count -ne $Car.Count) { throw '-GraphFrom needs one entry per -Car (use "" for none)' }
 if (-not $Sqlite) { $Sqlite = (Get-Command sqlite3 -ErrorAction SilentlyContinue).Source }
 if (-not $Sqlite -and (Test-Path "$bin\sqlite3.exe")) { $Sqlite = "$bin\sqlite3.exe" }
-$cars = Join-Path $GameRoot 'Mount\media\cars'
+. (Join-Path $PSScriptRoot '..\build\StockSource.ps1')   # Get-GameMediaFile: installed cars are in Mount\mediapc
 
 function Read-Entries([string]$zip) {   # entry name (lowercase, '/') -> bytes, for the light files and exterior models
   $z = [IO.Compression.ZipFile]::OpenRead($zip); $h = @{}
@@ -118,7 +118,7 @@ $ws = Join-Path $root "build\.lights-$Name"; if (Test-Path $ws) { Remove-Item -R
 $modDir = Join-Path $ws 'car-lights'
 for ($ci = 0; $ci -lt $Car.Count; $ci++) {
   $c = $Car[$ci]; $dn = $Donor[$ci]
-  $tz = Get-ChildItem $cars -Filter "$c.zip" | Select-Object -First 1; $dz = Get-ChildItem $cars -Filter "$dn.zip" | Select-Object -First 1
+  $tz = Get-GameMediaFile $GameRoot "cars\$c.zip"; $dz = Get-GameMediaFile $GameRoot "cars\$dn.zip"
   if (-not $tz) { throw "$c isn't installed (no media\cars\$c.zip)" }; if (-not $dz) { throw "No FH2 car $dn" }
   $T = Read-Entries $tz.FullName; $D = Read-Entries $dz.FullName
   if (-not $D.ContainsKey('lights.bin')) { throw "$dn has no Lights.bin" }
@@ -281,7 +281,7 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
     # LightPresets.bin: "LDFB", u32 size, u32 1, u32 function count, then one block per function (u32 block size
     # first; tagged properties: tag 0x02 = colour), in the order of the PG_Function_* names in LightPresets.bin_debug.
     # The headlight and beam functions are swapped for the other car's (same roles, same block sizes).
-    $pf = $PresetFrom[$ci]; $pz2 = Get-ChildItem $cars -Filter "$pf.zip" | Select-Object -First 1; if (-not $pz2) { throw "No car $pf for -PresetFrom" }
+    $pf = $PresetFrom[$ci]; $pz2 = Get-GameMediaFile $GameRoot "cars\$pf.zip"; if (-not $pz2) { throw "No car $pf for -PresetFrom" }
     $presetCar = Read-Entries $pz2.FullName
     $fns = { param($bin, $dbg)
       $names = @([regex]::Matches([Text.Encoding]::ASCII.GetString($dbg), 'PG_Function_[A-Za-z0-9_]+') | ForEach-Object Value | Select-Object -Unique)
@@ -319,7 +319,7 @@ for ($ci = 0; $ci -lt $Car.Count; $ci++) {
 
   if ($GraphFrom -and $GraphFrom[$ci]) {
     # the graph names its animations (.\x.gr2) and bones (root_<bone>); the car must have all of them
-    $g = $GraphFrom[$ci]; $gz = Get-ChildItem $cars -Filter "$g.zip" | Select-Object -First 1; if (-not $gz) { throw "No car $g for -GraphFrom" }
+    $g = $GraphFrom[$ci]; $gz = Get-GameMediaFile $GameRoot "cars\$g.zip"; if (-not $gz) { throw "No car $g for -GraphFrom" }
     $zz = [IO.Compression.ZipFile]::OpenRead($gz.FullName)
     try { $ge = $zz.Entries | Where-Object { $_.FullName -ieq "Animations/$g.gsf" }; $ms = New-Object IO.MemoryStream; $st = $ge.Open(); $st.CopyTo($ms); $st.Close(); $graph = $ms.ToArray() } finally { $zz.Dispose() }
     $txt = [Text.Encoding]::ASCII.GetString($graph)

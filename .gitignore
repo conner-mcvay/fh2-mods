@@ -7,3 +7,4 @@ tools/weather-menu/*.exe
 __pycache__/
 tools/online/**/out/
 tools/online/server/captures/
+tools/online/server/data/

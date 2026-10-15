@@ -8,7 +8,8 @@ This package contains **no game files**. Everything is read from your own FM5 an
 
 | | |
 |---|---|
-| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.7** |
+| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.9** |
+| FH2 Extra Options | **0.2.74 or later**, installed in Azimuth (`data\bin\azimuth-tls.dll`, or `azimuth-tls-next.dll` when fh2net is installed). The importer turns on its `[Files] EnableMediaOverrides=1` setting. |
 | Forza Motorsport 5 | version 1.0.0.20 (`Forza_1.0.0.20_x64__8wekyb3d8bbwe`), any folder (it isn't run, only read) |
 | Windows | 10 or 11, with the built-in Windows PowerShell 5.1 |
 | Internet | once, to download `sqlite3.exe` from sqlite.org (checked against its known hash) |
@@ -57,7 +58,9 @@ Imports stack: run the importer again any time to add more cars; the cars you al
 
 ## Good to know
 
-- The importer edits the game's database, car and wheel archives, `zipmanifest.xml` and Azimuth's file index (`Mount\hash.manifest`), and patches `azimuth.exe` so it accepts the new index. Everything it changes is backed up first.
+- The importer writes only to `<FH2 folder>\Mount\mediapc`, which Extra Options loads over the game's own media: the game database, car and wheel archives and `zipmanifest.xml` go there. The game's `Mount\media`, `hash.manifest` and `azimuth.exe` are never touched. Deleting `Mount\mediapc` removes every import at once.
+- **Upgrading from 1.x** (Azimuth 0.9.7, which patched `hash.manifest` and `azimuth.exe`): undo your 1.x layers first with their `Uninstall.ps1` (newest first), or restore the game folder from a clean copy, then re-import with 2.0. See the guide.
+- Extra Options 0.2.74 also unlocks DLC cars and adds stock rims for FH2's own cars, so the old dlc-unlock and stock-wheel-swap mods aren't needed. The importer still adds imported cars' wheels itself (Extra Options' rims cover FH2's own cars only).
 - Engine **sounds are borrowed** from the sound donor.
 - Keep this folder: you need it to add more cars later. Your settings are remembered in `%LOCALAPPDATA%\fh2-mods\import-fm5-cars.json`.
 
