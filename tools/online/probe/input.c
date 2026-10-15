@@ -1,14 +1,17 @@
 // Included by fh2net.c. Scripted controller input for automated tests: with [input] Script=<file> (relative
 // to the DLL's folder), Azimuth's XInputGetState (which it resolves with GetProcAddress) is wrapped, and the
 // buttons the script presses are merged into controller 0's state (a missing controller reads as connected).
-// Script lines: "wait <ms>", "press <button> [hold ms]" (A B X Y START BACK LB RB LS RS UP DOWN LEFT RIGHT),
-// "# comment". Each press is followed by a 400 ms gap.
+// Script lines: "wait <ms>", "press <button> [hold ms]" (A B X Y START BACK LB RB LS RS UP DOWN LEFT RIGHT;
+// each press is followed by a 400 ms gap), "trigger L|R <0-255>" and "stick LX|LY|RX|RY <-32768..32767>" (held
+// until changed), "release" (triggers and sticks back to 0), "label" and "loop" (go back to the label, forever),
+// "# comment". An empty script still makes a missing controller read as connected, so the game doesn't pause.
 
 typedef struct { WORD wButtons; BYTE bLeftTrigger, bRightTrigger; SHORT sThumbLX, sThumbLY, sThumbRX, sThumbRY; } XPad;
 typedef struct { DWORD dwPacketNumber; XPad Gamepad; } XState;
 typedef DWORD (WINAPI *XInputGetState_t)(DWORD, XState *);
 static XInputGetState_t o_XInputGetState;
 static volatile LONG g_injectButtons, g_injectPacket;
+static volatile LONG g_axis[6];          // held by the script: left trigger, right trigger, LX, LY, RX, RY
 static wchar_t g_inputScript[MAX_PATH];
 
 static DWORD WINAPI h_XInputGetState(DWORD user, XState *s) {
@@ -17,6 +20,12 @@ static DWORD WINAPI h_XInputGetState(DWORD user, XState *s) {
   if (rc != ERROR_SUCCESS) { memset(s, 0, sizeof *s); rc = ERROR_SUCCESS; }
   WORD b = (WORD)g_injectButtons;
   if (b) s->Gamepad.wButtons |= b;
+  if (g_axis[0]) s->Gamepad.bLeftTrigger = (BYTE)g_axis[0];
+  if (g_axis[1]) s->Gamepad.bRightTrigger = (BYTE)g_axis[1];
+  if (g_axis[2]) s->Gamepad.sThumbLX = (SHORT)g_axis[2];
+  if (g_axis[3]) s->Gamepad.sThumbLY = (SHORT)g_axis[3];
+  if (g_axis[4]) s->Gamepad.sThumbRX = (SHORT)g_axis[4];
+  if (g_axis[5]) s->Gamepad.sThumbRY = (SHORT)g_axis[5];
   s->dwPacketNumber += (DWORD)g_injectPacket * 0x10000;   // the reading changes whenever an injected press does
   return rc;
 }
@@ -43,18 +52,40 @@ static WORD button_bit(const char *n) {
 
 static DWORD WINAPI input_script(LPVOID p) {
   (void)p;
-  FILE *f = _wfopen(g_inputScript, L"r");
+  FILE *f = _wfopen(g_inputScript, L"rb");
   if (!f) { logf("input: script %ls not found", g_inputScript); return 0; }
   logf("input: running %ls", g_inputScript);
   char line[256];
-  while (fgets(line, sizeof line, f)) {
+  long label = -1; int looped = 0;
+  for (;;) {
+    if (!fgets(line, sizeof line, f)) break;
     char cmd[32] = "", arg[32] = ""; int ms = 0;
     if (sscanf(line, "%31s %31s %d", cmd, arg, &ms) < 1 || cmd[0] == '#') continue;
-    if (!_stricmp(cmd, "wait")) { int w = atoi(arg); logf("input: wait %d ms", w); Sleep(w); }
+    if (!_stricmp(cmd, "label")) { label = ftell(f); continue; }
+    if (!_stricmp(cmd, "loop")) {
+      if (label < 0) { logf("input: loop without a label"); continue; }
+      if (!looped) logf("input: looping (later passes aren't logged)");
+      looped = 1; fseek(f, label, SEEK_SET); continue;
+    }
+    if (!_stricmp(cmd, "trigger") || !_stricmp(cmd, "stick")) {
+      static const char *names[] = { "L", "R", "LX", "LY", "RX", "RY" };
+      int k = -1;
+      for (int i = !_stricmp(cmd, "stick") ? 2 : 0; i < (!_stricmp(cmd, "stick") ? 6 : 2); i++) if (!_stricmp(arg, names[i])) k = i;
+      if (k < 0) { logf("input: unknown %s %s", cmd, arg); continue; }
+      if (!looped) logf("input: %s %s %d", cmd, arg, ms);
+      InterlockedExchange(&g_axis[k], ms); InterlockedIncrement(&g_injectPacket);
+      continue;
+    }
+    if (!_stricmp(cmd, "release")) {
+      for (int i = 0; i < 6; i++) InterlockedExchange(&g_axis[i], 0);
+      InterlockedIncrement(&g_injectPacket);
+      continue;
+    }
+    if (!_stricmp(cmd, "wait")) { int w = atoi(arg); if (!looped) logf("input: wait %d ms", w); Sleep(w); }
     else if (!_stricmp(cmd, "press")) {
       WORD b = button_bit(arg);
       if (!b) { logf("input: unknown button %s", arg); continue; }
-      logf("input: press %s", arg);
+      if (!looped) logf("input: press %s", arg);
       InterlockedExchange(&g_injectButtons, b); InterlockedIncrement(&g_injectPacket);
       Sleep(ms > 0 ? ms : 150);
       InterlockedExchange(&g_injectButtons, 0); InterlockedIncrement(&g_injectPacket);

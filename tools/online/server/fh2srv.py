@@ -14,6 +14,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
 ap.add_argument('--host', default='127.0.0.1', help='HTTP address to listen on; 0.0.0.0 for consoles on the LAN')
 ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP port (all addresses, IPv4 and IPv6)")
+ap.add_argument('--mirror', type=float, help='testing alone: send each console itself back as a ghost player, its car this many seconds late')
 ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'captures'))
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -311,6 +312,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
-relay.start(args.out, lock, args.game_port)
+relay.start(args.out, lock, args.game_port, mirror=args.mirror)
 print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

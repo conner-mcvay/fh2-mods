@@ -10,6 +10,9 @@ creates or updates is forwarded to the other consoles with its handle marked as 
 handle: peer index), and kept in a history that is replayed in order to consoles that join later. A console's
 car (CarPredictionFull, ~30 a second, unsequenced) is forwarded the same way but not kept.
 
+Testing alone (fh2srv --mirror <seconds>): each console also gets its own objects back as another player's
+(peer 250), and its car that many seconds late - a ghost of itself to show that car sync works.
+
 A console that starts over (an OpenConnection in packet 0: a new launch), goes quiet for 15 s or closes the
 connection is dropped: the others get an ObjectDelete for each of its objects.
 
@@ -28,6 +31,7 @@ NAMES = {0: 'OpenConnection', 1: 'OpenConnectionResponse', 2: 'CloseConnection',
 OWN_ATTEMPT = 1
 SESSION_HOST = (6, 0)        # router, object id of the server's SessionHost
 QUIET_DROP_S = 15
+MIRROR_INDEX = 250           # the peer index of the mirror's ghost player
 
 
 class Peer:
@@ -47,8 +51,10 @@ class Peer:
 
 
 class Relay:
-    def __init__(self, out_dir, lock, port=5101, host='::'):
+    def __init__(self, out_dir, lock, port=5101, host='::', mirror=None):
         self.out_dir, self.lock = out_dir, lock
+        self.mirror = mirror                 # seconds: each console also gets itself back as a ghost player
+        self.delayed = []                    # (due, peer, msgs) for the mirror's cars
         self.sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)   # IPv4 consoles too (as ::ffff:a.b.c.d)
         self.sock.bind((host, port))
@@ -130,7 +136,7 @@ class Relay:
         if peer is None:
             peer = self.peers[addr] = Peer(addr, next(self.indices) % 255 or next(self.indices))
         peer.last_seen = time.monotonic()
-        out, notes, fwd, out_seq, cars = [], [], [], [], []
+        out, notes, fwd, out_seq, cars, mirror_objs = [], [], [], [], [], []
         peer.acks.add(hdr['id'])
         notes.append(f'peer {peer.index} id {hdr["id"]} cnt {hdr["count"]}')
         for _ in range(hdr['count']):
@@ -176,9 +182,12 @@ class Relay:
                 peer.objects[(o['router'], o['id'])] = o['seq']
                 self.history.append((peer.index, msg, o))
                 fwd.append(nerd.object_msg(msg, o['router'], o['id'], o['seq'], o['payload'], peer=peer.index, type=o.get('type', 0)))
+                mirror_objs.append((msg, o))
             elif msg == 15:
                 h, body = nerd.read_car(r)
                 cars.append(nerd.car_msg(h['id'], body, peer=peer.index))
+                if self.mirror is not None:
+                    self.delayed.append((time.monotonic() + self.mirror, peer, nerd.car_msg(h['id'], body, peer=MIRROR_INDEX)))
                 peer.cars += 1
                 notes.append(name)
             elif msg == 34:                  # no fields: the console has loaded the session's resources
@@ -192,6 +201,11 @@ class Relay:
                 break
         if fwd:
             self.forward(peer, fwd)
+            if self.mirror is not None:      # the console's own objects, back to it as the ghost's
+                ghost = [nerd.object_msg(m, o['router'], o['id'], o['seq'], o['payload'], peer=MIRROR_INDEX, type=o.get('type', 0))
+                         for m, o in mirror_objs]
+                for i in range(0, len(ghost), 8):
+                    self.send(peer, ghost[i:i + 8], sequenced=True)
         if cars:
             self.forward(peer, cars, sequenced=False)
         if out_seq:
@@ -220,6 +234,18 @@ class Relay:
             if not quiet or self.n % 500 == 0:
                 print(f'{time.strftime("%H:%M:%S")} udp #{self.n} [{addr[0]}]:{addr[1]} {len(data)} bytes: {rec["what"]}', flush=True)
 
+    def mirror_cars(self):
+        """The mirror's car messages, each sent back to its console once its delay is up."""
+        while True:
+            time.sleep(0.005)
+            with self.mu:
+                now = time.monotonic()
+                due = [d for d in self.delayed if d[0] <= now]
+                self.delayed = [d for d in self.delayed if d[0] > now]
+                for _, p, m in due:
+                    if p.addr in self.peers:
+                        self.send(p, [m])
+
     def keepalive(self):
         """Ping each synced peer every half second (with the current acks); drop peers quiet for 15 s."""
         while True:
@@ -232,8 +258,10 @@ class Relay:
                         self.send(p, [nerd.ping(self.now())])
 
 
-def start(out_dir, lock, port=5101, host='::'):
-    relay = Relay(out_dir, lock, port, host)
+def start(out_dir, lock, port=5101, host='::', mirror=None):
+    relay = Relay(out_dir, lock, port, host, mirror)
     threading.Thread(target=relay.run, daemon=True).start()
+    if mirror is not None:
+        threading.Thread(target=relay.mirror_cars, daemon=True).start()
     threading.Thread(target=relay.keepalive, daemon=True).start()
     return relay
