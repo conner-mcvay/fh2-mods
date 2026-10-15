@@ -58,7 +58,21 @@ static HRESULT STDMETHODCALLTYPE fw_Activate(void *t, Obj **out) {
 }
 static void *g_fwVtbl[] = { fw_QI, fw_AddRef, fw_Release, fw_3, fw_4, fw_5, fw_Activate };
 
+// [debug] Party=1: the Windows.Xbox.Multiplayer.Party statics (any interface) go through the logging proxy.
+static int g_debugParty;
+static int wrap_party(const wchar_t *cls, GUID *iid, void **out) {
+  (void)iid;
+  if (!g_debugParty || !*out || wcscmp(cls, L"Windows.Xbox.Multiplayer.Party")) return 0;
+  char b[40]; guidstr(iid, b);
+  static char names[8][64]; static LONG n;
+  char *name = names[InterlockedIncrement(&n) & 7];
+  snprintf(name, 64, "Party{%.8s}", b);
+  *out = log_proxy(*out, name);
+  return 1;
+}
+
 static int wrap_streams(const wchar_t *cls, GUID *iid, void **out) {
+  if (wrap_party(cls, iid, out)) return 1;
   static const GUID IID_IActivationFactory_ = { 0x00000035, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } };
   if (!g_debugStreams || !*out || wcscmp(cls, L"Windows.Storage.Streams.DataWriter") || !IsEqualGUID(iid, &IID_IActivationFactory_)) return 0;
   FactoryWrap *w = HeapAlloc(GetProcessHeap(), 0, sizeof *w);

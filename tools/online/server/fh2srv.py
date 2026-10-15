@@ -5,7 +5,7 @@ gets 503.
 
   py -3 -I fh2srv.py [--port 8090] [--out <folder>]
 """
-import argparse, datetime, http.server, json, os, struct, sys, threading, uuid
+import argparse, datetime, hashlib, http.server, json, os, struct, sys, threading, time, uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import xls
@@ -87,6 +87,9 @@ GSI_SET = '00000000-0000-0000-0000-00000000f003'
 # '6CC152FD' is the string at 142F4DAF0), unless a hopper's cloudGsiSetPattern says otherwise.
 GSI_NAME = 'Release_6CC152FD.FreeRoam'
 LOCATION = 'North Central US'   # the game's default datacenter (1422EDAE8)
+# the dedicated server the game is told about (its secure device address is base64 of anything, for now)
+SERVER_ADDRESS = 'ZmgybmV0LWdhbWUtc2VydmVy'   # "fh2net-game-server"
+SERVER_HOST = '127.0.0.1'
 
 
 def gsds_variants(method, path, body):
@@ -126,13 +129,40 @@ def merge(dst, src):
         else: dst[k] = v
 
 
+PREALLOCATE = True    # game sessions get their server at once: the game then offers 'free roam session found, press Select to join'
+
+
+def server_entry(location):
+    return {'constants': {'system': {}, 'custom': {}}, 'properties': {'system': {}, 'custom': {
+        'status': 'Active', 'datacenter': location, 'secureDeviceAddress': SERVER_ADDRESS, 'hostName': SERVER_HOST}}}
+
+
+def gsms(method, path, body):
+    # Game server management: POST /titles/<gameServerTitleId>/clusters {sessionId ...} (XSAPI AllocateClusterAsync).
+    # The session named gets its server entry, and the cluster is answered as fulfilled.
+    p = path.split('?')[0]
+    if method != 'POST' or not p.endswith('/clusters'): return 503, None
+    req = json.loads(body or b'{}')
+    sid = req.get('sessionId', '')
+    with MPSD_LOCK:
+        for k, doc in MPSD.items():
+            if sid and (k.lower().endswith(sid.lower().split('/')[-1]) or sid.lower() in k.lower()):
+                gsp = doc['constants'].get('custom', {}).get('gameServerPlatform', {})
+                doc['servers']['gameServerPlatform'] = server_entry(gsp.get('location', LOCATION))
+                break
+    return 200, {'pollIntervalMilliseconds': 1000, 'fulfillmentState': 'Fulfilled', 'hostName': SERVER_HOST,
+                 'region': LOCATION, 'secureDeviceAddress': SERVER_ADDRESS,
+                 'portMappings': [{'name': 'Game', 'value': 5100, 'internal': 5100, 'external': 5100}]}
+
+
 def mpsd_sessions(method, path, body, xuid='2533274790395904', gamertag='Player 1'):
     p = path.split('?')[0]
     if method == 'GET' and p.endswith('/sessions'):
-        return 200, {'results': [{'sessionRef': {'scid': k.split('/')[2], 'templateName': k.split('/')[4], 'name': k.split('/')[6]},
-                                  'xuid': xuid} for k in MPSD]}
+        # the sessions a user is in; listing earlier runs' sessions made the game try to rejoin them at startup
+        return 200, {'results': []}
     if '/sessions/' not in p: return 503, None
-    now = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    # ISO 8601 with milliseconds, as the session directory wrote them (6-digit fractions are rejected)
+    now = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
     with MPSD_LOCK:
         doc = MPSD.get(p)
         if method == 'GET':
@@ -160,9 +190,18 @@ def mpsd_sessions(method, path, body, xuid='2533274790395904', gamertag='Player 
                     idx = str(doc['membersInfo']['next']); doc['membersInfo']['next'] += 1
                     doc['members'][idx] = {'constants': {'system': {'xuid': xuid, 'index': int(idx)}, 'custom': {}},
                                            'properties': {'system': {'active': False, 'ready': False}, 'custom': {}}, 'gamertag': gamertag,
-                                           'deviceToken': '0' * 32, 'nat': 'open', 'activeTitleId': '446059611',
-                                           'joinTime': now, 'turn': 0, 'initializationEpisode': 0}
+                                           'deviceToken': hashlib.md5(('fh2net-device-' + xuid).encode()).hexdigest().upper(), 'nat': 'open', 'activeTitleId': '446059611', 'reserved': False,
+                                           'joinTime': now, 'turn': False, 'initializationEpisode': 0}
                 merge(doc['members'][idx], m)
+        # A game session (constants.custom.gameServerPlatform) gets its dedicated server at once, as Turn 10's
+        # allocation (Xbox Live Compute) used to write it: the game (14183B360) reads
+        # servers.gameServerPlatform.properties.custom: status Active / Queued / Error / Quarantined, then
+        # datacenter, secureDeviceAddress (base64) and hostName.
+        gsp = doc['constants'].get('custom', {}).get('gameServerPlatform')
+        if gsp and 'gameServerPlatform' not in doc['servers'] and PREALLOCATE:
+            doc['servers']['gameServerPlatform'] = {'constants': {'system': {}, 'custom': {}}, 'properties': {'system': {}, 'custom': {
+                'status': 'Active', 'datacenter': gsp.get('location', LOCATION),
+                'secureDeviceAddress': SERVER_ADDRESS, 'hostName': SERVER_HOST}}}
         mi = doc['membersInfo']; mi['count'] = len(doc['members']); mi['accepted'] = mi['count']
         mi['active'] = sum(1 for v in doc['members'].values() if v['properties']['system'].get('active'))
         if doc['members']: mi['first'] = min(int(i) for i in doc['members'])
@@ -173,6 +212,7 @@ def mpsd_sessions(method, path, body, xuid='2533274790395904', gamertag='Player 
 REST = [
     ('gameserverds.xboxlive.com', '/', gsds),
     ('sessiondirectory.xboxlive.com', '/serviceconfigs/', mpsd_sessions),
+    ('gameserverms.xboxlive.com', '/titles/', gsms),
 ]
 
 
@@ -236,5 +276,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
+def udp_listener(port=5101):
+    """The game server's UDP endpoint: the address fh2net's SecureDeviceAssociation hands the game ([::1]:5101).
+    For now it only records what the game sends (captures/udp.jsonl) and never answers."""
+    import socket
+    s = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+    s.bind(('::1', port))
+    print(f'fh2srv game UDP on [::1]:{port}', flush=True)
+    n = 0
+    while True:
+        data, addr = s.recvfrom(65536)
+        n += 1
+        stamp = time.strftime('%H:%M:%S')
+        with lock, open(os.path.join(args.out, 'udp.jsonl'), 'a', encoding='utf-8') as f:
+            f.write(json.dumps({'n': n, 'time': time.time(), 'from': f'[{addr[0]}]:{addr[1]}', 'hex': data.hex()}) + '\n')
+        if n <= 50 or n % 100 == 0:
+            print(f'{stamp} udp #{n} from [{addr[0]}]:{addr[1]} {len(data)} bytes: {data[:48].hex()}', flush=True)
+
+
+threading.Thread(target=udp_listener, daemon=True).start()
 print(f'fh2srv listening on 127.0.0.1:{args.port}, captures in {args.out}', flush=True)
 http.server.ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()

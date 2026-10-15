@@ -129,6 +129,8 @@ static int wrap_qos(const wchar_t *cls, GUID *iid, void **out);   // qos.c
 static int wrap_json(const wchar_t *cls, GUID *iid, void **out);  // json.c
 static int wrap_streams(const wchar_t *cls, GUID *iid, void **out);  // proxy.c
 static int fix_streams(const wchar_t *cls, GUID *iid, void **out);   // streams.c
+static int fix_party(const wchar_t *cls, GUID *iid, void **out);     // party.c
+static int fix_association(const wchar_t *cls, GUID *iid, void **out);  // assoc.c
 
 // vccorlib110: ?GetActivationFactoryByPCWSTR@@YAJPEAXAEAVGuid@Platform@@PEAPEAX@Z (name, iid, out)
 typedef HRESULT (*GetAF_t)(void *, GUID *, void **);
@@ -146,7 +148,7 @@ static HRESULT h_GetAF(void *name, GUID *iid, void **out) {
     *out = w;
     logf("  wrapped NetworkInformation statics (level %d)", g_netLevel);
   }
-  if (SUCCEEDED(hr)) { wrap_qos(cls, iid, out); wrap_json(cls, iid, out); if (!fix_streams(cls, iid, out)) wrap_streams(cls, iid, out); }
+  if (SUCCEEDED(hr)) { wrap_qos(cls, iid, out); wrap_json(cls, iid, out); if (!fix_party(cls, iid, out) && !fix_association(cls, iid, out) && !fix_streams(cls, iid, out)) wrap_streams(cls, iid, out); }
   return hr;
 }
 
@@ -307,6 +309,7 @@ static BYTE *find_module(const char *exportName) {
 }
 
 #include "trace.c"
+#include "input.c"
 
 // A module's bound import, by name (to call Azimuth's own combase, whose HSTRINGs the game understands).
 static void *iat_lookup(BYTE *base, const char *dllName, const char *fnName) {
@@ -320,6 +323,40 @@ static void *iat_lookup(BYTE *base, const char *dllName, const char *fnName) {
         return ((void **)(base + d->FirstThunk))[k];
   }
   return NULL;
+}
+
+// ---- real sockets -----------------------------------------------------------------------------------
+// Azimuth answers the game's Winsock imports with offline stubs (WSASocketW fails with WSAENETDOWN, and
+// bind / connect / sendto share one stub), so the game's network transport never starts. With
+// [net] RealSockets=1 every ws2_32 import of the module goes to Windows' own ws2_32; where fh2net logs a
+// call, its hook stays in the IAT and forwards to the real function.
+static int g_realSockets;
+static void real_sockets(BYTE *base, const char *tag) {
+  HMODULE ws = LoadLibraryW(L"ws2_32.dll");
+  IMAGE_NT_HEADERS64 *nt = (void *)(base + ((IMAGE_DOS_HEADER *)base)->e_lfanew);
+  IMAGE_DATA_DIRECTORY dd = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+  int n = 0;
+  for (IMAGE_IMPORT_DESCRIPTOR *d = (void *)(base + dd.VirtualAddress); d->Name; d++) {
+    if (_stricmp((const char *)(base + d->Name), "ws2_32.dll")) continue;
+    ULONGLONG *names = (void *)(base + d->OriginalFirstThunk);
+    void **iat = (void **)(base + d->FirstThunk);
+    for (int k = 0; names[k]; k++) {
+      void *real = IMAGE_SNAP_BY_ORDINAL64(names[k])
+        ? (void *)GetProcAddress(ws, MAKEINTRESOURCEA(IMAGE_ORDINAL64(names[k])))
+        : (void *)GetProcAddress(ws, (const char *)((IMAGE_IMPORT_BY_NAME *)(base + names[k]))->Name);
+      if (!real) continue;
+      int hooked = 0;
+      for (size_t h = 0; h < sizeof g_hooks / sizeof *g_hooks; h++)
+        if (iat[k] == g_hooks[h].hook) { *g_hooks[h].orig = real; hooked = 1; }
+      if (!hooked) {
+        DWORD old; VirtualProtect(&iat[k], 8, PAGE_READWRITE, &old);
+        iat[k] = real;
+        VirtualProtect(&iat[k], 8, old, &old);
+      }
+      n++;
+    }
+  }
+  logf("real sockets: %d ws2_32 imports of %s go to Windows' ws2_32", n, tag);
 }
 
 // ---- Xbox Live tokens --------------------------------------------------------------------------
@@ -419,6 +456,8 @@ static HRESULT STDMETHODCALLTYPE s_tokBuf(void *t, void *m, void *u, void *h, vo
 #include "json.c"
 #include "proxy.c"
 #include "streams.c"
+#include "party.c"
+#include "assoc.c"
 
 // Azimuth 0.9.7's vtables (RVAs in azimuth.exe), checked slot by slot before patching.
 typedef struct { DWORD table; int slot; DWORD expect; void *fn; } VtPatch;
@@ -455,6 +494,7 @@ static DWORD WINAPI worker(LPVOID p) {
     if (n >= 0) { logf("game imports bound; %d hooks installed after %d polls", n, i); break; }
     Sleep(1);
   }
+  if (g_realSockets) real_sockets(GAME_BASE, "the game");
   if (g_fakeToken) install_token_hooks();
   trace_install(L"Game", GAME_BASE, 0x140000000ULL, "game");
   xhr_init();
@@ -491,12 +531,19 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   g_fakeQos = GetPrivateProfileIntW(L"net", L"FakeQos", 0, g_ini);
   g_debugJson = GetPrivateProfileIntW(L"debug", L"Json", 0, g_ini);
   g_debugStreams = GetPrivateProfileIntW(L"debug", L"Streams", 0, g_ini);
+  g_debugParty = GetPrivateProfileIntW(L"debug", L"Party", 0, g_ini);
   g_fixStreams = GetPrivateProfileIntW(L"net", L"FixStreams", 0, g_ini);
+  g_realSockets = GetPrivateProfileIntW(L"net", L"RealSockets", 0, g_ini);
+  g_fakeParty = GetPrivateProfileIntW(L"net", L"FakeParty", 0, g_ini);
+  g_fakeAssociation = GetPrivateProfileIntW(L"net", L"FakeAssociation", 0, g_ini);
+  GetPrivateProfileStringW(L"net", L"ServerAddress", L"::1", g_serverIp6, 64, g_ini);
+  g_serverPort = GetPrivateProfileIntW(L"net", L"ServerPort", 5101, g_ini);
   GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);
   logf("settings: ConnectivityLevel=%d FakeToken=%d FakeQos=%d FixStreams=%d Server=%ls", g_netLevel, g_fakeToken, g_fakeQos, g_fixStreams, g_httpServer);
   // The forwarded exports resolve against this module once it is loaded under its own name.
   HMODULE nx = LoadLibraryW(next);
   logf("azimuth-tls-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());
+  input_install(path);
   CloseHandle(CreateThread(NULL, 0, worker, NULL, 0, NULL));
   return TRUE;
 }

@@ -165,7 +165,7 @@ static const GUID IID_ISecureDeviceAddressStatics = { 0x02addb0f, 0x4880, 0x4b1e
 static wchar_t g_localAddress[256];
 #define SA_FWD(slot) static HRESULT STDMETHODCALLTYPE sa_##slot(void *t, void *a, void *b, void *c, void *d, void *e, void *f) { \
   return VCALL(QS(t)->real, slot, HRESULT (STDMETHODCALLTYPE *)(void *, void *, void *, void *, void *, void *, void *))(QS(t)->real, a, b, c, d, e, f); }
-SA_FWD(3) SA_FWD(4) SA_FWD(5) SA_FWD(6) SA_FWD(7) SA_FWD(8) SA_FWD(10) SA_FWD(11) SA_FWD(12) SA_FWD(13)
+SA_FWD(3) SA_FWD(4) SA_FWD(5) SA_FWD(6) SA_FWD(7) SA_FWD(8) SA_FWD(10) SA_FWD(12) SA_FWD(13)
 static HRESULT STDMETHODCALLTYPE sa_QI(void *t, const GUID *iid, void **out) {
   if (IsEqualGUID(iid, &IID_ISecureDeviceAddressStatics) || IsEqualGUID(iid, &IID_IUnknown_) || IsEqualGUID(iid, &IID_IInspectable_)) {
     InterlockedIncrement(&QS(t)->refs); *out = t; return S_OK;

@@ -24,9 +24,17 @@ static LONG CALLBACK trace_handler(EXCEPTION_POINTERS *e) {
     for (int i = 0; i < g_traceCount; i++) {
       if (g_trace[i].addr != at) continue;
       LONG n = InterlockedIncrement(&g_trace[i].hits);
-      if (n <= 40)
+      if (n <= 40) {
         logf("trace %s %p hit %ld: rcx %llx rdx %llx r8 %llx r9 %llx rax %llx rbx %llx rsi %llx rdi %llx [rsp] %llx", g_trace[i].tag, at, n,
              c->Rcx, c->Rdx, c->R8, c->R9, c->Rax, c->Rbx, c->Rsi, c->Rdi, *(ULONG64 *)c->Rsp);
+        // the first 32 bytes rcx and rdx point at, when readable
+        DWORD64 regs[2] = { c->Rcx, c->Rdx }; const char *rn[2] = { "rcx", "rdx" };
+        for (int r = 0; r < 2; r++) {
+          if (regs[r] < 0x10000 || !readable((void *)regs[r], 32)) continue;
+          const DWORD *w = (const DWORD *)regs[r];
+          logf("    [%s] %08lx %08lx %08lx %08lx %08lx %08lx %08lx %08lx", rn[r], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+        }
+      }
       trace_write(at, g_trace[i].orig);
       c->Rip = (DWORD64)at;
       c->EFlags |= 0x100;                       // single-step the original instruction

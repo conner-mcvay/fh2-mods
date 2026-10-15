@@ -28,6 +28,19 @@ Token=XBL3.0 x=1234567890;fh2net
 Server=http://127.0.0.1:8090   ; every web request goes here instead of its own host
 ```
 
+Further `[net]` settings, each replacing an Azimuth offline stub that blocks the online path:
+
+| Setting | File | What it does |
+|---|---|---|
+| `FakeQos=1` | `qos.c` | `QualityOfService.MeasureQualityOfServiceAsync` answers a completed measurement (status 1, 20 ms) for every address |
+| `LocalAddress=<base64>` | `qos.c` | `SecureDeviceAddress.GetLocal`/`FromBase64String` objects answer their base64 (Azimuth's answer an empty string, so session members can't be written) |
+| `FixStreams=1` | `streams.c` | fh2net's own `DataWriter`/`Buffer`/`DataReader` (Azimuth's `DataWriter` drops every byte, so Xbox Live replies read as empty) |
+| `RealSockets=1` | `fh2net.c` | the game's ws2_32 imports go to Windows' ws2_32 |
+| `FakeParty=1` | `party.c` | `Party` register game/match session (statics slots 6, 7) answer a completed action |
+| `FakeAssociation=1` | `assoc.c` | `SecureDeviceAssociationTemplate.CreateAssociationAsync` answers an association whose remote socket address is `ServerAddress`/`ServerPort` (default `[::1]:5101`) |
+
+Debugging: `[trace] Game=`/`Xsapi=` (int3 trace points, `trace.c`), `[debug] Json/Streams/Party` (logging proxies), and `[input] Script=` (scripted controller presses, `input.c`). `Run-Test.ps1 -Tag <name>` runs one test unattended: archives the captures, starts Azimuth, presses Enter in its launcher, waits for the input script to finish, closes the game.
+
 What it does:
 
 - Hooks the game's and `Microsoft.Xbox.Services.dll`'s imports (`CoCreateInstance`, WinRT activation, Winsock, `OutputDebugString`) and logs them.
@@ -62,8 +75,21 @@ After Logon the game calls: `Xls.WebServices.User.GetUserData`, `Storefront.GetF
 
 Starting a private free roam session calls Xbox Live's game server discovery (`POST gameserverds.xboxlive.com/titles/1368890819/variants`, body `{"locale":"en-us","maxVariants":8,"publisherOnly":false}`); unanswered, the game says it can't reach the Live configuration servers. The game then allocates a cluster (`AllocateClusterAsync` on `gameserverms.xboxlive.com`, `IDS_MultiplayerStatus_AllocatingCluster`) and connects to the server it gets (`[SecureIPResolver][CreateGameServerAssociation]`). These were Turn 10's servers on Xbox Live Compute; their program was never public. The client's replication code has server roles (`m_pManager->IsServer()`, `IsServerOwned`, `SessionHost`), which is worth reading before deciding how to stand in for the server.
 
+## Reaching the join prompt (2026-10-15)
+
+`fh2srv.py` answers the variants (`GSI_NAME` `Release_6CC152FD.FreeRoam`), `/qosservers`, and runs an in-memory session directory (MPSD contract 105). When the game writes its game session (`gameServerPlatform` constants), the server pre-fills `servers.gameServerPlatform` with an Active server (`secureDeviceAddress` `ZmgybmV0LWdhbWUtc2VydmVy`), so `AllocateServer` (`141836190`) skips the cluster allocation. The game then shows "freeroam session found, press select to join!".
+
+Joining creates a secure device association to the server's address (`SecureIPResolver`, `1417A0FF0`, template `SecurePeerTraffic`), then reads the association's remote socket address (slot 9, a 28-byte `sockaddr_in6`, `141763310`). The game's UDP socket is `[::]:5100` (manifest `SecureConsoleSocket`).
+
+## The game's first packets to the server
+
+With `FakeAssociation=1`, the game sends to `[::1]:5101` (recorded in `captures/udp.jsonl`) a 51-byte packet every ~2.1 s, 5 tries, then 5 more with one field changed:
+
+```
+0000 feff 00000000 01 33 0000 109ba1a1981a1923221023b6b0b339b4 3438 00..00 1200 0400 00..00 0200 00000000
+```
+
 ## Next
 
-1. Work out the `Logon` response format from the client's deserializer (the `Xls` namespace: `LspAuthenticator`, `HttpRequest`, `CLspConnection`) and answer it, so the game counts as connected to Turn 10's services.
-2. Answer the Xbox Live calls with minimal valid JSON (profile, presence, session directory).
-3. Peer-to-peer: Azimuth refuses the game's UDP socket and secure device associations; replace them with plain UDP or a relay.
+1. Decode that handshake from the client's receive path and answer it.
+2. Answer the remaining LSP calls with real data.
