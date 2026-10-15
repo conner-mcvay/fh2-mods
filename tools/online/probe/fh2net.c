@@ -132,6 +132,7 @@ static int fix_streams(const wchar_t *cls, GUID *iid, void **out);   // streams.
 static int fix_party(const wchar_t *cls, GUID *iid, void **out);     // party.c
 static int fix_association(const wchar_t *cls, GUID *iid, void **out);  // assoc.c
 static void game_patches(void);                                         // patches.c
+static void xuid_patch(void);                                           // patches.c
 
 // vccorlib110: ?GetActivationFactoryByPCWSTR@@YAJPEAXAEAVGuid@Platform@@PEAPEAX@Z (name, iid, out)
 typedef HRESULT (*GetAF_t)(void *, GUID *, void **);
@@ -204,6 +205,12 @@ static int WSAAPI h_connect(SOCKET s, const struct sockaddr *sa, int len) {
 typedef int (WSAAPI *bind_t)(SOCKET, const struct sockaddr *, int);
 static bind_t o_bind;
 static int WSAAPI h_bind(SOCKET s, const struct sockaddr *sa, int len) {
+  // The game's UDP socket is IPv6 ([::]:5100) and Windows makes those IPv6-only: let it reach IPv4 hosts too
+  // (as ::ffff:a.b.c.d), so [net] ServerAddress can be a LAN server's IPv4 address.
+  if (sa && sa->sa_family == AF_INET6) {
+    DWORD off = 0;
+    setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, (const char *)&off, sizeof off);
+  }
   int rc = o_bind(s, sa, len);
   char a[64]; addrstr(sa, a, sizeof a);
   logf("bind %lld %s -> %d", (long long)s, a, rc);
@@ -531,6 +538,13 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   g_fakeToken = GetPrivateProfileIntW(L"xbl", L"FakeToken", 0, g_ini);
   GetPrivateProfileStringW(L"xbl", L"Token", L"XBL3.0 x=1234567890;fh2net", g_token, 512, g_ini);
   GetPrivateProfileStringW(L"http", L"Server", L"", g_httpServer, 256, g_ini);
+  GetPrivateProfileStringW(L"xbl", L"Xuid", L"2533274790395904", g_xuid, 32, g_ini);
+  GetPrivateProfileStringW(L"xbl", L"Gamertag", L"", g_gamertag, 64, g_ini);
+  if (!g_gamertag[0]) {   // Azimuth's player name, from data\azimuth.ini next to data\bin
+    wchar_t az[MAX_PATH]; _snwprintf(az, MAX_PATH, L"%ls..\\azimuth.ini", path);
+    GetPrivateProfileStringW(L"launcher", L"player_name", L"Player 1", g_gamertag, 64, az);
+  }
+  logf("player: xuid %ls, gamertag %ls", g_xuid, g_gamertag);
   g_fakeQos = GetPrivateProfileIntW(L"net", L"FakeQos", 0, g_ini);
   g_debugJson = GetPrivateProfileIntW(L"debug", L"Json", 0, g_ini);
   g_debugStreams = GetPrivateProfileIntW(L"debug", L"Streams", 0, g_ini);
@@ -547,6 +561,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   // The forwarded exports resolve against this module once it is loaded under its own name.
   HMODULE nx = LoadLibraryW(next);
   logf("azimuth-tls-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());
+  xuid_patch();
   input_install(path);
   CloseHandle(CreateThread(NULL, 0, worker, NULL, 0, NULL));
   return TRUE;

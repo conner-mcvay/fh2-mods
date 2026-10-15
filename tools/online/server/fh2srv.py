@@ -12,6 +12,8 @@ import relay, xls
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--port', type=int, default=8090)
+ap.add_argument('--host', default='127.0.0.1', help='HTTP address to listen on; 0.0.0.0 for consoles on the LAN')
+ap.add_argument('--game-port', type=int, default=5101, help="the relay's UDP port (all addresses, IPv4 and IPv6)")
 ap.add_argument('--out', default=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'captures'))
 args = ap.parse_args()
 os.makedirs(args.out, exist_ok=True)
@@ -155,7 +157,11 @@ def gsms(method, path, body):
                  'portMappings': [{'name': 'Game', 'value': 5100, 'internal': 5100, 'external': 5100}]}
 
 
-def mpsd_sessions(method, path, body, xuid='2533274790395904', gamertag='Player 1'):
+DEFAULT_XUID = '2533274790395904'   # Azimuth's
+GAMERTAGS = {}                       # xuid -> gamertag, from the consoles' X-Fh2net-* headers
+
+
+def mpsd_sessions(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
     p = path.split('?')[0]
     if method == 'GET' and p.endswith('/sessions'):
         # the sessions a user is in; listing earlier runs' sessions made the game try to rejoin them at startup
@@ -209,7 +215,7 @@ def mpsd_sessions(method, path, body, xuid='2533274790395904', gamertag='Player 
         return (201 if new else 200), doc
 
 
-def profile(method, path, body, xuid='2533274790395904', gamertag='Player 1'):
+def profile(method, path, body, xuid=DEFAULT_XUID, gamertag='Player 1'):
     # Profile settings (XSAPI ProfileService): POST /users/batch/profile/settings {userIds, settings} answers
     # every user asked for; GET /users/me/profile/settings/people/People (the friends' profiles) answers none.
     p = path.split('?')[0]
@@ -219,7 +225,7 @@ def profile(method, path, body, xuid='2533274790395904', gamertag='Player 1'):
     req = json.loads(body or b'{}')
     users = []
     for uid in req.get('userIds', []):
-        tag = gamertag if uid == xuid else f'Driver {str(uid)[-4:]}'
+        tag = gamertag if uid == xuid else GAMERTAGS.get(uid, f'Driver {str(uid)[-4:]}')
         # The picture settings must be URLs: XSAPI makes a Uri of each, and the game (14124D790) reads the
         # game picture's Uri without a null check, so an empty value crashes it.
         pic = 'http://images-eds.xboxlive.com/image?url=fh2srv&format=png'
@@ -277,7 +283,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             for h, prefix, fn in REST:
                 if host.lower() == h and self.path.startswith(prefix):
-                    st, obj = fn(self.command, self.path, body)
+                    if fn in (mpsd_sessions, profile):
+                        # who is asking (fh2net sends it; every console's token is the same made-up one)
+                        xuid = self.headers.get('X-Fh2net-Xuid', DEFAULT_XUID)
+                        gamertag = self.headers.get('X-Fh2net-Gamertag', 'Player 1')
+                        GAMERTAGS[xuid] = gamertag
+                        st, obj = fn(self.command, self.path, body, xuid, gamertag)
+                    else:
+                        st, obj = fn(self.command, self.path, body)
                     if obj is not None:
                         status, reply, ctype = st, json.dumps(obj).encode(), 'application/json'
                         rec['reply_text'] = reply.decode()[:4000]
@@ -298,6 +311,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
 
-relay.start(args.out, lock)
-print(f'fh2srv listening on 127.0.0.1:{args.port}, captures in {args.out}', flush=True)
-http.server.ThreadingHTTPServer(('127.0.0.1', args.port), Handler).serve_forever()
+relay.start(args.out, lock, args.game_port)
+print(f'fh2srv listening on {args.host}:{args.port}, captures in {args.out}', flush=True)
+http.server.ThreadingHTTPServer((args.host, args.port), Handler).serve_forever()

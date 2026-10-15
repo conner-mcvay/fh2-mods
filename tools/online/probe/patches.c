@@ -1,4 +1,5 @@
-// Included by fh2net.c after assoc.c. Code patches in the game, each checked against the original bytes.
+// Included by fh2net.c after assoc.c. Code patches in the game and in Azimuth, each checked against the
+// original bytes.
 //
 // [net] SkipWeatherWait=1: the free roam entry (stateflow network.xml initial_entry_common) waits in
 // WaitForFullWeatherReady (update 1409641D0) for the session's weather object, which the server made from the
@@ -16,6 +17,22 @@ static int patch_bytes(BYTE *at, const BYTE *orig, const BYTE *repl, SIZE_T n, c
   FlushInstructionCache(GetCurrentProcess(), at, n);
   logf("patch %s applied at %p", what, at);
   return 1;
+}
+
+// [xbl] Xuid=<decimal>: the player's Xbox user id. Azimuth 0.9.7 has it as a constant (0x9000000000000 =
+// 2533274790395904); consoles playing together each need their own. Only the XboxUserId string (movabs r8
+// at RVA 23855) is patched: the other use (RVA 131D25) names the save container (User_%llX), and changing
+// it would start a new save.
+static void xuid_patch(void) {
+  wchar_t s[32]; GetPrivateProfileStringW(L"xbl", L"Xuid", L"", s, 32, g_ini);
+  if (!s[0]) return;
+  ULONG64 x = wcstoull(s, NULL, 10);
+  BYTE *az = (BYTE *)GetModuleHandleW(NULL);
+  BYTE orig[10] = { 0x49, 0xB8 }, repl[10] = { 0x49, 0xB8 };
+  ULONG64 azx = 0x9000000000000ULL;
+  memcpy(orig + 2, &azx, 8); memcpy(repl + 2, &x, 8);
+  patch_bytes(az + 0x23855, orig, repl, 10, "Xuid");
+  logf("xuid %llu", x);
 }
 
 static void game_patches(void) {

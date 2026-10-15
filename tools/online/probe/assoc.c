@@ -7,7 +7,7 @@
 
 static int g_fakeAssociation;
 static const GUID IID_ISecureDeviceAssociationTemplateStatics = { 0x46745a18, 0x697a, 0x47e1, { 0xbb, 0x62, 0xcc, 0x71, 0xde, 0x0f, 0xdd, 0x8c } };
-static wchar_t g_serverIp6[64];   // [net] ServerAddress= (IPv6, default ::1), ServerPort= (default 5101)
+static wchar_t g_serverIp6[64];   // [net] ServerAddress= (IPv4 or IPv6, default ::1), ServerPort= (default 5101)
 static int g_serverPort;
 
 // The association. Slot 9 (GetRemoteSocketAddressBytes: array length, bytes) answers the server's
@@ -17,7 +17,11 @@ static HRESULT STDMETHODCALLTYPE sda_RemoteBytes(Probe *t, UINT32 len, BYTE *byt
   (void)t;
   struct sockaddr_in6 a = { 0 };
   a.sin6_family = AF_INET6; a.sin6_port = htons((u_short)g_serverPort);
-  if (InetPtonW(AF_INET6, g_serverIp6, &a.sin6_addr) != 1) logf("association: bad ServerAddress %ls", g_serverIp6);
+  struct in_addr v4;
+  if (InetPtonW(AF_INET, g_serverIp6, &v4) == 1) {   // an IPv4 server: ::ffff:a.b.c.d (the socket is dual-stack)
+    a.sin6_addr.s6_addr[10] = a.sin6_addr.s6_addr[11] = 0xFF;
+    memcpy(&a.sin6_addr.s6_addr[12], &v4, 4);
+  } else if (InetPtonW(AF_INET6, g_serverIp6, &a.sin6_addr) != 1) logf("association: bad ServerAddress %ls", g_serverIp6);
   if (len < sizeof a) { logf("association: remote address asked into %u bytes", len); return E_INVALIDARG; }
   memset(bytes, 0, len); memcpy(bytes, &a, sizeof a);
   logf("association: remote socket address [%ls]:%d", g_serverIp6, g_serverPort);

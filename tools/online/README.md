@@ -113,9 +113,16 @@ The server is now a relay (`server/relay.py`): consoles own their objects and th
 
 Object messages (all in `nerd.py`): ObjectCreate/Update are router id (4 bits), handle (flags a/b: 1/1 server update, 0/1 relay + 8-bit peer index, 1/0 transfer, 0/0 the sender's own; then the id, whose width is the router's), [Create, when the router has several types: type id], seq u8, payload size u14, payload (per var: var index - bit length of the var count - and its data). Routers: 1, 2, 3 the player's (3 is ConsoleSynced), 6 the lobby (SessionHost, GameOptions), 8, 9 Road Trip, 10 weather, 11, 12 Bucket List. The message table also has a description of many messages (`142F4DB20`, second pointer), which spell out the server's role.
 
+## Two consoles on a LAN (2026-10-15)
+
+- Server PC: `py -3 -I server\fh2srv.py --host 0.0.0.0` (HTTP on 8090 for every address; the relay always listens on UDP 5101, IPv4 and IPv6). Windows Firewall has to let `python.exe` in (TCP 8090, UDP 5101).
+- Other console: fh2net with `[http] Server=http://<server IP>:8090` and `[net] ServerAddress=<server IP>` (IPv4 works: fh2net makes the game's IPv6 socket dual-stack and hands it `::ffff:a.b.c.d`), its own `[net] LocalAddress`, and its own `[xbl] Xuid`. Azimuth hard-codes the user id (2533274790395904); fh2net patches the XboxUserId string. Azimuth names the save after the user id (`data\saves\<profile>\User_<hex xuid>`), so a console with another xuid needs a save copied into its folder (`User_9000000000001` for ...905) or it starts a new game.
+- fh2net sends `X-Fh2net-Xuid` / `X-Fh2net-Gamertag` with every request; fh2srv writes session members and profile names from them.
+- The relay forgets a console that starts over (an OpenConnection in packet 0), closes, or goes quiet for 15 s, and deletes its objects for the others, so the server no longer needs restarting between game launches.
+- Cars: CarPredictionFull (15) is handle + 710 bits (fixed; all 18671 captured ones round-trip), forwarded unsequenced with the relay handle.
+
 ## Next
 
-1. Relay the car itself: CarPredictionFull (15, ~30 a second, unsequenced) - its format, then forward with the peer's handle. Then the other messages consoles send (35, 71, ...).
-2. Two consoles: a second machine (or a second instance with its own identity: user id, gamertag, port).
+1. Test with two consoles. The other messages consoles send (35, 71, ...) aren't relayed yet.
 3. Weather (above), so consoles share it instead of skipping the wait.
 4. Answer the remaining LSP calls with real data.

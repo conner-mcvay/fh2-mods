@@ -11,6 +11,8 @@ static const GUID IID_IUnknown_x = { 0, 0, 0, { 0xc0, 0, 0, 0, 0, 0, 0, 0x46 } }
 
 static wchar_t g_httpServer[256];       // [http] Server, e.g. http://127.0.0.1:8090 (empty: Azimuth's offline requests)
 static wchar_t g_srvHost[128]; static INTERNET_PORT g_srvPort; static int g_srvTls;
+static wchar_t g_xuid[32];               // [xbl] Xuid (default Azimuth's 2533274790395904)
+static wchar_t g_gamertag[64];           // [xbl] Gamertag, else Azimuth's player_name (data\azimuth.ini)
 static HINTERNET g_winhttp;
 static volatile LONG g_reqSeq;
 typedef void *(WINAPI *CoTaskMemAlloc_t)(SIZE_T);
@@ -146,7 +148,10 @@ static DWORD WINAPI x_run(LPVOID param) {
   c = WinHttpConnect(g_winhttp, g_srvHost, g_srvPort, 0);
   r = c ? WinHttpOpenRequest(c, x->method && *x->method ? x->method : L"GET", target, NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, g_srvTls ? WINHTTP_FLAG_SECURE : 0) : NULL;
   if (!r) { fail(x, HRESULT_FROM_WIN32(GetLastError()), "connect"); goto done; }
-  wchar_t fwd[512]; swprintf(fwd, 512, L"X-Fh2net-Host: %ls\r\nX-Fh2net-Scheme: %ls\r\n", host, scheme);
+  // Who is asking: fh2srv writes session members and profile names from these (every console's Xbox Live
+  // token is the same made-up one).
+  wchar_t fwd[512]; swprintf(fwd, 512, L"X-Fh2net-Host: %ls\r\nX-Fh2net-Scheme: %ls\r\nX-Fh2net-Xuid: %ls\r\nX-Fh2net-Gamertag: %ls\r\n",
+                             host, scheme, g_xuid, g_gamertag);
   WinHttpAddRequestHeaders(r, fwd, (DWORD)-1L, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (x->headersLen) WinHttpAddRequestHeaders(r, x->headers, (DWORD)x->headersLen, WINHTTP_ADDREQ_FLAG_ADD | WINHTTP_ADDREQ_FLAG_REPLACE);
   if (!WinHttpSendRequest(r, WINHTTP_NO_ADDITIONAL_HEADERS, 0, x->body, x->bodyLen, x->bodyLen, 0) || !WinHttpReceiveResponse(r, NULL)) {

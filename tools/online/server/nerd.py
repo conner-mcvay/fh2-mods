@@ -165,6 +165,46 @@ def object_msg(msg, router, id, seq, payload=None, peer=None, type=0):
     return concat(w, payload) if payload else w
 
 
+def read_handle(r, idw):
+    a, b = r.bits(1), r.bits(1)
+    h = dict(a=a, b=b, id=r.bits(idw))
+    if b and not a:
+        h['peer'] = r.bits(8)
+    return h
+
+
+def write_handle(w, idw, id, peer=None):
+    """A console's own handle (0, 0), or, with peer, the relay form (0, 1) + the owning peer's index."""
+    w.bits(0, 1).bits(1 if peer is not None else 0, 1).bits(id, idw)
+    if peer is not None:
+        w.bits(peer, 8)
+    return w
+
+
+def object_delete(router, id, seq, peer=None):
+    """ObjectDelete (9; 1417AB560): router, handle, seq u8 (newer than the object's last)."""
+    idw, _ = ROUTERS[router]
+    return write_handle(BitWriter().bits(9, 7).bits(router, 4), idw, id, peer).bits(seq & 0xFF, 8)
+
+
+# CarPredictionFull (15; send 141808170, receive 1417CF0A0 / 141808240): the car's handle (7-bit id: the
+# player's car object), the prediction (678 bits, fixed: 14181FFE0 96 + 141822400 326 + 4 x 141825F00 64),
+# then a u32. Sent unsequenced, about 30 a second.
+CAR_BODY_BITS = 678 + 32
+
+
+def read_car(r):
+    h = read_handle(r, 7)
+    body = BitWriter()
+    for _ in range(CAR_BODY_BITS):
+        body.bits(r.bits(1), 1)
+    return h, body
+
+
+def car_msg(id, body, peer=None):
+    return concat(write_handle(BitWriter().bits(15, 7), 7, id, peer), body)
+
+
 def server_update(router, id, seq, payload):
     """An ObjectUpdate from the server for server-owned vars of a console's own object: handle flags (1, 1)
     and the console's own object id (SyncedObject::PackServerUpdateObjectId, 1417B1A20)."""
