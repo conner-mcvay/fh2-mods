@@ -27,6 +27,7 @@ if ($Uninstall) {
   return
 }
 $ours = Join-Path $PSScriptRoot 'fh2net.dll'
+if (-not (Test-Path -LiteralPath $ours)) { throw "fh2net.dll is missing next to this script; run it from the extracted release." }
 if (-not (Test-Path -LiteralPath $cur)) { throw "No azimuth-tls.dll in $bin. Install Extra Options first." }
 if (& $isOurs $cur) {
   if (-not (Test-Path -LiteralPath $next)) { throw 'azimuth-tls.dll is fh2net but azimuth-tls-next.dll is missing; put Extra Options there.' }

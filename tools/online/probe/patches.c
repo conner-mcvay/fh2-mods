@@ -9,13 +9,29 @@
 
 static int g_skipWeatherWait;
 
-static int patch_bytes(BYTE *at, const BYTE *orig, const BYTE *repl, SIZE_T n, const char *what) {
+#define EXEC_PROTECT (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)
+
+static DWORD page_protect(const void *at) {
+  MEMORY_BASIC_INFORMATION mbi;
+  return VirtualQuery(at, &mbi, sizeof mbi) ? mbi.Protect : 0;
+}
+
+// code: the bytes are game code. Azimuth 0.9.9 maps the game image writable first and makes its code executable
+// a moment later; restoring the protection found before that took the execute right away from the patched page
+// (a DEP crash right after start). So code is patched only once its page is executable, and left execute-read.
+static int patch_bytes(BYTE *at, const BYTE *orig, const BYTE *repl, SIZE_T n, const char *what, int code) {
+  if (code) {
+    int i;
+    for (i = 0; i < 60000 && !(page_protect(at) & EXEC_PROTECT); i++) Sleep(1);
+    if (!(page_protect(at) & EXEC_PROTECT)) { logf("patch %s at %p: page never became executable (0x%lx), not applied", what, at, page_protect(at)); return 0; }
+    if (i) logf("patch %s: waited %d ms for the game code to become executable", what, i);
+  }
   if (!readable(at, n) || memcmp(at, orig, n)) { logf("patch %s at %p: original bytes differ, not applied", what, at); return 0; }
   DWORD old; VirtualProtect(at, n, PAGE_EXECUTE_READWRITE, &old);
   memcpy(at, repl, n);
-  VirtualProtect(at, n, old, &old);
+  VirtualProtect(at, n, code ? PAGE_EXECUTE_READ : old, &old);
   FlushInstructionCache(GetCurrentProcess(), at, n);
-  logf("patch %s applied at %p", what, at);
+  logf("patch %s applied at %p (protection 0x%lx)", what, at, page_protect(at));
   return 1;
 }
 
@@ -33,7 +49,7 @@ static void xuid_patch(void) {
   BYTE orig[10] = { 0x49, 0xB8 }, repl[10] = { 0x49, 0xB8 };
   ULONG64 azx = 0x9000000000000ULL;
   memcpy(orig + 2, &azx, 8); memcpy(repl + 2, &x, 8);
-  patch_bytes(az + l->xuidRva, orig, repl, 10, "Xuid");
+  patch_bytes(az + l->xuidRva, orig, repl, 10, "Xuid", 0);
   logf("xuid %llu", x);
 }
 
@@ -47,10 +63,10 @@ static int g_skipTrafficWait;
 static void game_patches(void) {
   if (g_skipTrafficWait) {
     static const BYTE orig[] = { 0x75, 0x0D }, nops[] = { 0x90, 0x90 };
-    patch_bytes(GAME_BASE + (0x1408E0658 - 0x140000000ULL), orig, nops, 2, "SkipTrafficWait");
+    patch_bytes(GAME_BASE + (0x1408E0658 - 0x140000000ULL), orig, nops, 2, "SkipTrafficWait", 1);
   }
   if (g_skipWeatherWait) {
     static const BYTE orig[] = { 0x48, 0x8B, 0x0D }, jmp[] = { 0xEB, 0x48 };   // mov rcx, [rip+..] -> jmp 140964234
-    patch_bytes(GAME_BASE + (0x1409641EA - 0x140000000ULL), orig, jmp, 2, "SkipWeatherWait");
+    patch_bytes(GAME_BASE + (0x1409641EA - 0x140000000ULL), orig, jmp, 2, "SkipWeatherWait", 1);
   }
 }
