@@ -13,11 +13,12 @@ static XInputGetState_t o_XInputGetState;
 static volatile LONG g_injectButtons, g_injectPacket;
 static volatile LONG g_axis[6];          // held by the script: left trigger, right trigger, LX, LY, RX, RY
 static wchar_t g_inputScript[MAX_PATH];
+static int g_hideRealPad;                // [input] HideRealController=1: controller 0 is the script's alone
 
 static DWORD WINAPI h_XInputGetState(DWORD user, XState *s) {
   DWORD rc = o_XInputGetState ? o_XInputGetState(user, s) : ERROR_DEVICE_NOT_CONNECTED;
   if (user != 0 || !g_inputScript[0]) return rc;
-  if (rc != ERROR_SUCCESS) { memset(s, 0, sizeof *s); rc = ERROR_SUCCESS; }
+  if (rc != ERROR_SUCCESS || g_hideRealPad) { memset(s, 0, sizeof *s); rc = ERROR_SUCCESS; }
   WORD b = (WORD)g_injectButtons;
   if (b) s->Gamepad.wButtons |= b;
   if (g_axis[0]) s->Gamepad.bLeftTrigger = (BYTE)g_axis[0];
@@ -27,6 +28,9 @@ static DWORD WINAPI h_XInputGetState(DWORD user, XState *s) {
   if (g_axis[4]) s->Gamepad.sThumbRX = (SHORT)g_axis[4];
   if (g_axis[5]) s->Gamepad.sThumbRY = (SHORT)g_axis[5];
   s->dwPacketNumber += (DWORD)g_injectPacket * 0x10000;   // the reading changes whenever an injected press does
+  static LONG calls; LONG c = InterlockedIncrement(&calls);
+  if (c % 500 == 1) logf("input: XInputGetState #%ld from %p: packet %lu buttons %04x LT %u RT %u LX %d", c, __builtin_return_address(0),
+                         s->dwPacketNumber, s->Gamepad.wButtons, s->Gamepad.bLeftTrigger, s->Gamepad.bRightTrigger, s->Gamepad.sThumbLX);
   return rc;
 }
 
@@ -101,6 +105,7 @@ static DWORD WINAPI input_script(LPVOID p) {
 static void input_install(const wchar_t *dir) {
   wchar_t rel[MAX_PATH] = L"";
   GetPrivateProfileStringW(L"input", L"Script", L"", rel, MAX_PATH, g_ini);
+  g_hideRealPad = GetPrivateProfileIntW(L"input", L"HideRealController", 0, g_ini);
   if (!rel[0]) return;
   _snwprintf(g_inputScript, MAX_PATH, L"%ls%ls", dir, rel);
   BYTE *az = (BYTE *)GetModuleHandleW(NULL);
