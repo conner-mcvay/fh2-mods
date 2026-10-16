@@ -137,7 +137,7 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 
 ## Turbo and supercharger volume
 
-**Double-click `Set-BoostVolume.cmd`**, type the cars (MediaNames like `FOR_MustangGT500_13`, wildcards like `*Mustang*`, or `all`) and the dB to add to each sound: turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is very loud. Close the game first.
+**Double-click `Set-BoostVolume.cmd`**, pick the cars (type part of a name like `mustang` and pick numbers from the list of matches, which shows each car's sounds and current setting; or `all`) and type the dB to add to each sound (Enter keeps the current setting): turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is very loud. Close the game first.
 
 ```powershell
 .\tools\audio\Set-BoostVolume.ps1 -Car FOR_MustangGT500_13 -DSC 12        # louder supercharger whine

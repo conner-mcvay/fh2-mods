@@ -26,7 +26,7 @@
 #>
 [CmdletBinding()]
 param(
-  [string[]]$Car,             # car MediaNames (FOR_MustangGT500_13), wildcards ('*Mustang*'), or all
+  [string[]]$Car,             # car MediaNames (FOR_MustangGT500_13), part of a name (mustang), wildcards, or all
   [double]$Turbo = 0,         # dB to add to the turbo sounds (-80 to 24; 0 = leave as stock)
   [double]$DSC = 0,           # dB to add to the positive-displacement supercharger sounds
   [double]$CSC = 0,           # dB to add to the centrifugal supercharger sounds
@@ -68,10 +68,17 @@ function Assert-Closed {   # the game's Azimuth (any Azimuth when it isn't known
 }
 
 $allCars = @(Get-ChildItem $stockDir -Filter 'PG_*.bank' | ForEach-Object { $_.BaseName.Substring(3) } | Sort-Object)
+function Find-Cars([string]$term) {
+  # the exact name; a wildcard pattern (*Mustang*); or every car whose name holds all the words (mustang, 'mustang 13')
+  $exact = @($allCars | Where-Object { $_ -ieq $term }); if ($exact) { return $exact }
+  if ($term -match '[*?]') { return @($allCars | Where-Object { $_ -like $term }) }
+  $words = @($term -split '\s+' | Where-Object { $_ })
+  @($allCars | Where-Object { $n = $_; -not ($words | Where-Object { $n -notlike "*$_*" }) })
+}
 function Resolve-Cars([string[]]$names) {
   if (-not $names -or $names -contains 'all') { return $allCars }
   $out = foreach ($n in $names) {
-    $hit = @($allCars | Where-Object { $_ -like $n })
+    $hit = Find-Cars $n
     if (-not $hit) { throw "No car sound bank matches '$n' (names are MediaNames like FOR_MustangGT500_13; -List shows them)" }
     $hit
   }
@@ -79,22 +86,52 @@ function Resolve-Cars([string[]]$names) {
 }
 function Read-Bank([string]$c) { New-Object FmodBank (, [IO.File]::ReadAllBytes((Join-Path $stockDir "PG_$c.bank"))) }
 function Kinds-Of($bank) { ($bank.Sounds | Group-Object Kind | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ' }
+function Set-Of([string]$c) { $s = $manifest[$c]; if ($s) { "set: Turbo $($s.Turbo), DSC $($s.DSC), CSC $($s.CSC) dB" } }
 
+$interactiveGiven = @()
 if ($interactive) {
   Write-Host "`nTurbo / supercharger volume for FH2 cars`n" -ForegroundColor Cyan
-  Write-Host 'Cars: MediaNames like FOR_MustangGT500_13, wildcards like *Mustang*, or all (comma-separated).'
-  $Car = @((Ask 'Cars') -split '\s*,\s*' | Where-Object { $_ })
-  if (-not $Car) { return }
-  Write-Host 'dB to add to each sound (0 = stock; +6 is about twice as loud, +24 is very loud; up to 24).'
-  $Turbo = [double]('0' + (Ask 'Turbo (single and twin) [0]')); $DSC = [double]('0' + (Ask 'Positive-displacement supercharger (DSC) [0]')); $CSC = [double]('0' + (Ask 'Centrifugal supercharger (CSC) [0]'))
+  Write-Host "Pick the cars: type part of a name (e.g. mustang, 'camaro 69'), then numbers from the list; 'all' for every car."
+  $picked = @()
+  while ($true) {
+    $a = Ask "`nCar to change$(if ($picked) { ' (Enter when done)' })"
+    if (-not $a) { if ($picked) { break } else { continue } }
+    if ($a -ieq 'all') { $picked = $allCars; Write-Host "  all $($allCars.Count) cars"; break }
+    $hits = Find-Cars $a
+    if (-not $hits) { Write-Host '  No match. Try part of the name, e.g. "mustang" or "gt500".' -ForegroundColor Yellow; continue }
+    if ($hits.Count -gt 1) {
+      for ($i = 0; $i -lt $hits.Count; $i++) {
+        $b = Read-Bank $hits[$i]
+        Write-Host ('  {0,3}) {1,-32} {2,-32} {3}' -f ($i + 1), $hits[$i], $(if ($b.Sounds.Count) { Kinds-Of $b } else { '(none)' }), (Set-Of $hits[$i]))
+      }
+      $sel = Ask "  Numbers (e.g. 1,3 or 2-4), 'a' for all $($hits.Count), Enter to search again"
+      if (-not $sel) { continue }
+      if ($sel -ieq 'a') { $chosen = $hits }
+      else {
+        $nums = @($sel -split '\s*,\s*' | ForEach-Object {
+          if ($_ -match '^(\d+)\s*-\s*(\d+)$') { [int]$Matches[1]..[int]$Matches[2] } elseif ($_ -match '^\d+$') { [int]$_ }
+        })
+        $chosen = @($nums | Where-Object { $_ -ge 1 -and $_ -le $hits.Count } | ForEach-Object { $hits[$_ - 1] })
+        if (-not $chosen) { Write-Host '  Type numbers from the list.' -ForegroundColor Yellow; continue }
+      }
+    } else { $chosen = $hits }
+    $picked = @($picked + $chosen | Sort-Object -Unique)
+    Write-Host "  added: $($chosen -join ', ')" -ForegroundColor Green
+  }
+  $Car = $picked
+  Write-Host "`ndB to add to each sound (0 = stock; +6 is about twice as loud, +24 is very loud; up to 24). Enter keeps each car's current setting."
+  foreach ($k in @(@('Turbo', 'Turbo (single and twin)'), @('DSC', 'Positive-displacement supercharger (DSC)'), @('CSC', 'Centrifugal supercharger (CSC)'))) {
+    $a = Ask "  $($k[1])"
+    if ($a) { Set-Variable $k[0] ([double]$a); $interactiveGiven += $k[0] }
+  }
+  if (-not $interactiveGiven) { Write-Host 'Nothing to change.'; return }
 }
 $cars = Resolve-Cars $Car
 
 if ($List) {
   foreach ($c in $cars) {
     $b = Read-Bank $c; $set = $manifest[$c]
-    "{0,-34} {1,-34} {2}" -f $c, $(if ($b.Sounds.Count) { Kinds-Of $b } else { '(no turbo/supercharger sounds)' }),
-      $(if ($set) { "set: Turbo $($set.Turbo), DSC $($set.DSC), CSC $($set.CSC) dB" })
+    "{0,-34} {1,-34} {2}" -f $c, $(if ($b.Sounds.Count) { Kinds-Of $b } else { '(no turbo/supercharger sounds)' }), (Set-Of $c)
   }
   return
 }
@@ -117,7 +154,7 @@ if ($Remove) {
 
 foreach ($g in $Turbo, $DSC, $CSC) { if ($g -lt -80 -or $g -gt 24) { throw 'Gains must be between -80 and 24 dB' } }
 # the kinds given now; the others keep what this tool set before (so -Turbo later doesn't undo an earlier -DSC)
-$given = @('Turbo', 'DSC', 'CSC' | Where-Object { $interactive -or $PSBoundParameters.ContainsKey($_) })
+$given = @('Turbo', 'DSC', 'CSC' | Where-Object { $interactiveGiven -contains $_ -or $PSBoundParameters.ContainsKey($_) })
 if (-not $given) { throw 'Pass -Turbo, -DSC and/or -CSC (dB to add; 0 = stock), or -Remove' }
 $ini = if ($AzimuthRoot) { Join-Path $AzimuthRoot 'data\bin\FH2_ExtraOptions.ini' }
 if ($ini -and (Test-Path $ini) -and (Get-Content $ini -Raw) -notmatch '(?m)^\s*EnableMediaOverrides\s*=\s*1') {
