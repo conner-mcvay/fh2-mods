@@ -263,6 +263,7 @@ public class FmodBank {
   //                          into, Lows: the EQ on the group above them; either falls back to the other level)
   //   <Sound>Grit            the drive of its Turn10Saturator (on the group, else the tracks)
   //   LowFreq                the low-frequency layers (samples named LFE) on EngineRPM sheets (dB)
+//   Whistle                the layers on Boost sheets (WhistleLooping, AirLooping: the spool whistle and air), dB
   // <Sound> is Exhaust, Engine or Intake. Effects: BEFX > BEFF (BEFB: GUID, FMOD effect type at byte 20; 28 = 3-band
   // EQ) and PEFX > PEFF (PEFB: GUID, name length at 20, name: Turn10Saturator), each with PMEF = count, then per
   // setting u32 type (0 float, 1 int) + value; a bus uses the effects whose GUIDs its record holds. 3-EQ settings:
@@ -272,7 +273,7 @@ public class FmodBank {
     "ExhaustVolume", "ExhaustIdle", "ExhaustHighs", "ExhaustLows", "ExhaustGrit",
     "EngineVolume", "EngineIdle", "EngineHighs", "EngineLows", "EngineGrit",
     "IntakeVolume", "IntakeIdle", "IntakeHighs", "IntakeLows", "IntakeGrit",
-    "LowFreq", "Backfire", "Turbo", "DSC", "CSC", "BOV" };
+    "LowFreq", "Backfire", "Turbo", "Whistle", "DSC", "CSC", "BOV" };
 
   public class Target { public string Setting; public int Offset; public float Stock, Min, Max; public string What; }
   List<Target> targets;
@@ -296,7 +297,7 @@ public class FmodBank {
   List<Target> FindTargets() {
     var list = new List<Target>();
     foreach (var s in Sounds)   // Turbo / DSC / CSC / BOV, found by Find()
-      list.Add(new Target { Setting = s.Kind, Offset = s.VolumeOffset, Stock = s.StockVolume, Min = -80, Max = 30, What = s.Kind + " " + s.Range });
+      list.Add(new Target { Setting = s.Kind, Offset = s.VolumeOffset, Stock = s.StockVolume, Min = -80, Max = 60, What = s.Kind + " " + s.Range });
 
     var lfe = new Regex("(^|_)LFE(_|$)", RegexOptions.IgnoreCase);
     var rpm = new Regex(@"(\d{3,5})(?!.*\d{3})");
@@ -308,6 +309,9 @@ public class FmodBank {
       if (sound == null) continue;
       list.Add(new Target { Setting = sound == "LowFreq" ? "LowFreq" : sound + "Volume", Offset = l.VolumeOffset, Stock = l.Volume, Min = -80, Max = 40, What = string.Join(", ", l.Samples) });
     }
+    var seenBoost = new HashSet<int>();
+    foreach (var l in Layers().Where(l => l.Sheet == "Boost" && (l.Type == "WAIT" || l.Type == "MUIT") && !l.VolumeAutomated && l.Volume > -40))
+      if (seenBoost.Add(l.VolumeOffset)) list.Add(new Target { Setting = "Whistle", Offset = l.VolumeOffset, Stock = l.Volume, Min = -80, Max = 60, What = string.Join(", ", l.Samples) });
     foreach (var s in SoundsTuned) {   // idle: the layer recorded at the lowest RPM
       var mine = layers.Where(l => !lfe.IsMatch(l.Category) && l.Category.StartsWith(s, StringComparison.OrdinalIgnoreCase) && l.Samples.Length > 0).ToList();
       Func<FmodLayer, int> at = l => { var m = rpm.Match(l.Samples[0]); return m.Success ? int.Parse(m.Groups[1].Value) : 100000 + (int)l.Start; };

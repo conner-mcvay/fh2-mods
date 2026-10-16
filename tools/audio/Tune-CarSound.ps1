@@ -35,10 +35,11 @@ $sliders = @(
   @('IntakeHighs', 'Highs', 'Intake', -24, 24, 'The high band of the intake EQs, in dB (EQ limit +10 dB).'),
   @('IntakeLows', 'Lows', 'Intake', -24, 24, 'The low band of the intake EQ, in dB (EQ limit +10 dB).'),
   @('IntakeGrit', 'Grit', 'Intake', -20, 20, 'The intake saturator''s drive.'),
-  @('Turbo', 'Turbo', 'Turbo & other', -24, 24, 'Turbo sounds (single and twin), in dB. Played when a turbo is fitted.'),
-  @('DSC', 'Supercharger (DSC)', 'Turbo & other', -24, 24, 'Positive-displacement supercharger whine, in dB.'),
-  @('CSC', 'Supercharger (CSC)', 'Turbo & other', -24, 24, 'Centrifugal supercharger whine, in dB.'),
-  @('BOV', 'Blow-off valve', 'Turbo & other', -24, 24, 'Blow-off valve, in dB (on top of Turbo where it''s part of the turbo sound).'),
+  @('Turbo', 'Turbo', 'Turbo & other', -24, 48, 'The turbo sounds on the turbo''s upgrade levels (single and twin), in dB. The spool whistle is Boost whistle.'),
+  @('Whistle', 'Boost whistle', 'Turbo & other', -24, 48, 'The spool whistle and intake air that follow boost (WhistleLooping, AirLooping), in dB.'),
+  @('DSC', 'Supercharger (DSC)', 'Turbo & other', -24, 48, 'Positive-displacement supercharger whine, in dB.'),
+  @('CSC', 'Supercharger (CSC)', 'Turbo & other', -24, 48, 'Centrifugal supercharger whine, in dB.'),
+  @('BOV', 'Blow-off valve', 'Turbo & other', -24, 48, 'Blow-off valve, in dB (on top of Turbo where it''s part of the turbo sound).'),
   @('Backfire', 'Backfires', 'Turbo & other', -24, 24, 'Backfire pops, in dB.'),
   @('LowFreq', 'Low-frequency layer', 'Turbo & other', -24, 24, 'The separate sub-bass layer some cars have (LFE), in dB. Lower it if the car is boomy.')
 )
