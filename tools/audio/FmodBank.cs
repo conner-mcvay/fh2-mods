@@ -27,6 +27,19 @@ public class FmodBankSound {
   public float StockVolume;    // dB
 }
 
+// One placed sound layer (an instrument on a parameter sheet or an event timeline), for the inspector.
+public class FmodLayer {
+  public int Event;              // the event's number in the bank (1-based, bank order)
+  public string Sheet;           // the parameter whose sheet it's on (EngineRPM, Throttle, ...), or "timeline"
+  public float Start, End;       // where on the sheet it plays (parameter values; RPM on EngineRPM)
+  public string Type;            // WAIT (one sample), MUIT (a random pick of several), EVIT (a nested event), ...
+  public string[] Samples;       // sample names it plays (through a multi-instrument's children)
+  public string Category;        // the samples' common name without numbers (Exhaust, BackFire, bov, ...)
+  public int VolumeOffset;       // file offset of the instrument's volume (float, dB)
+  public float Volume;
+  public bool VolumeAutomated;   // a parameter drives the volume (the value above is then ignored)
+}
+
 public class FmodBank {
   public static readonly string[] Kinds = { "Turbo", "DSC", "CSC" };   // the upgrade-level parameters (BOV is by sample)
   static readonly Regex BovSample = new Regex("bov|blow|dump", RegexOptions.IgnoreCase);
@@ -147,6 +160,96 @@ public class FmodBank {
       int at = bus.Offset + 8 + 11;
       Sounds.Add(new FmodBankSound { Kind = "BOV", Range = "", VolumeOffset = at, StockVolume = BitConverter.ToSingle(Data, at) });
     }
+  }
+
+  // --- inspector -------------------------------------------------------------------------------------------------
+  // Parameter records (LIST PARM > PRMB): GUID, then the name's length (u16) at byte 21 and the name (built-in
+  // parameters such as distance have none). Instrument records: their INST chunk has the volume in dB (float) at
+  // byte 16; PRPS > PROP 0 is the volume's automation (bytes 8-23 of the PROP are zero when there is none).
+  // Sheets (PMLO > PMLB) and timelines (TMLN) list their instruments as GUID + start + length.
+  public Dictionary<string, string> ParameterNames() {
+    var names = new Dictionary<string, string>();
+    foreach (var p in Section("PRMS")) {
+      var b = Kids(p)[0]; if (b.Id != "PRMB" || b.Size < 23) continue;
+      int len = BitConverter.ToUInt16(Data, b.Offset + 8 + 21);
+      names[Guid16(b.Offset + 8)] = len > 0 && 23 + len <= b.Size ? Encoding.ASCII.GetString(Data, b.Offset + 8 + 23, len).TrimEnd('\0') : "(built-in)";
+    }
+    return names;
+  }
+
+  List<Chunk> Section(string name) {
+    var riff = Chunks(0, Data.Length).First();
+    var proj = Kids(riff).First(c => c.Id == "LIST" && ListType(c) == "PROJ");
+    var s = Kids(proj).FirstOrDefault(c => c.Id == "LIST" && ListType(c) == name);
+    return s.Id == "LIST" ? Kids(s).Where(c => c.Id != "LCNT").ToList() : new List<Chunk>();
+  }
+
+  public string[] SampleNames() {
+    int fsb = IndexOf(Encoding.ASCII.GetBytes("FSB5"));
+    if (fsb < 0 || BitConverter.ToInt32(Data, fsb + 4) != 1) return new string[0];
+    int count = BitConverter.ToInt32(Data, fsb + 8), names = fsb + 60 + BitConverter.ToInt32(Data, fsb + 12);
+    var r = new string[count];
+    for (int k = 0; k < count; k++) {
+      int o = names + BitConverter.ToInt32(Data, names + 4 * k), e = Array.IndexOf(Data, (byte)0, o);
+      string n = Encoding.ASCII.GetString(Data, o, e - o); int brace = n.IndexOf(" {"); r[k] = brace >= 0 ? n.Substring(0, brace) : n;
+    }
+    return r;
+  }
+
+  public static string CategoryOf(IEnumerable<string> samples) {
+    var cats = samples.Select(n => Regex.Replace(n, @"([_ -]?\d+)+([_ -]?[A-Za-z]{0,4}\d*)*$", "")).Where(c => c != "").Distinct().ToList();
+    return cats.Count == 0 ? "" : cats.Count == 1 ? cats[0] : string.Join("+", cats.Take(3));
+  }
+
+  public List<FmodLayer> Layers() {
+    var pnames = ParameterNames(); var sampleName = SampleNames();
+    var wav = new Dictionary<string, string>();
+    foreach (var w in Section("WAVS")) { int idx = BitConverter.ToInt32(Data, w.Offset + 8 + 22); if (idx >= 0 && idx < sampleName.Length) wav[RecordGuid(w)] = sampleName[idx]; }
+    var inst = new Dictionary<string, Chunk>();
+    foreach (var s in new[] { "WAIS", "MUIS", "SPIS", "PRIS", "EVIS" }) foreach (var c in Section(s)) inst[RecordGuid(c)] = c;
+    var events = Section("EVTS"); var evIndex = new Dictionary<string, int>();
+    for (int i = 0; i < events.Count; i++) evIndex[RecordGuid(events[i])] = i + 1;
+    var timelineEvent = new Dictionary<string, int>();   // TMLN GUID -> event (the EVNT has it at byte 32)
+    foreach (var e in events) if (e.Size >= 48) timelineEvent[Guid16(e.Offset + 8 + 32)] = evIndex[RecordGuid(e)];
+
+    var memo = new Dictionary<string, HashSet<string>>();
+    Func<string, int, HashSet<string>> samples = null;
+    samples = (g, depth) => {
+      HashSet<string> s; if (memo.TryGetValue(g, out s)) return s;
+      s = new HashSet<string>(); memo[g] = s;
+      foreach (var w in GuidsIn(inst[g], wav.Keys)) s.Add(wav[w]);
+      if (depth < 4) foreach (var child in GuidsIn(inst[g], inst.Keys)) if (child != g && inst[child].Id == "LIST" && ListType(inst[child]) != "EVIT") s.UnionWith(samples(child, depth + 1));
+      return s;
+    };
+    var layers = new List<FmodLayer>();
+    Action<int, int, int, string> place = (body, end, ev, sheet) => {
+      for (int i = body; i + 24 <= end; i++) {
+        Chunk c; if (!inst.TryGetValue(Guid16(i), out c)) continue;
+        var ic = Kids(c).FirstOrDefault(k => k.Id == "INST"); if (ic.Id != "INST" || ic.Size < 20) continue;
+        var prps = Kids(c).FirstOrDefault(k => k.Id == "LIST" && ListType(k) == "PRPS");
+        bool automated = false;
+        if (prps.Id == "LIST")
+          foreach (var p in Kids(prps).Where(k => k.Id == "PROP" && k.Size >= 24))
+            if (BitConverter.ToInt32(Data, p.Offset + 8) == 0) for (int j = 8; j < 24; j++) if (Data[p.Offset + 8 + j] != 0) automated = true;
+        var s = samples(Guid16(i), 0).OrderBy(n => n).ToArray();
+        float start = BitConverter.ToSingle(Data, i + 16), len = BitConverter.ToSingle(Data, i + 20);
+        layers.Add(new FmodLayer { Event = ev, Sheet = sheet, Start = start, End = start + len, Type = ListType(c), Samples = s,
+          Category = ListType(c) == "EVIT" ? "(nested event)" : CategoryOf(s), VolumeOffset = ic.Offset + 8 + 16,
+          Volume = BitConverter.ToSingle(Data, ic.Offset + 8 + 16), VolumeAutomated = automated });
+        i += 23;
+      }
+    };
+    foreach (var sheet in Section("PMLS")) {
+      var b = Kids(sheet)[0]; if (b.Id != "PMLB" || b.Size < 48) continue;
+      string pn; if (!pnames.TryGetValue(Guid16(b.Offset + 8), out pn)) pn = "?";
+      int ev; evIndex.TryGetValue(Guid16(b.Offset + 8 + 32), out ev);
+      place(b.Offset + 8 + 48, b.Offset + 8 + b.Size, ev, pn);
+    }
+    foreach (var t in Section("TLNS")) {
+      int ev; timelineEvent.TryGetValue(RecordGuid(t), out ev);
+      foreach (var k in Kids(t).Where(k => k.Id != "LIST" && k.Size > 16)) place(k.Offset + 8 + 16, k.Offset + 8 + k.Size, ev, "timeline");
+    }
+    return layers;
   }
 
   int IndexOf(byte[] s) {

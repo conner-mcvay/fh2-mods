@@ -50,7 +50,8 @@ tools/
     Fm5ModelConverter.cs                  converts FM5 car models/materials for FH2's shaders
   audio/
     Set-BoostVolume.ps1                   turbo / supercharger volume per car (Set-BoostVolume.cmd runs it)
-    FmodBank.cs                           finds those sounds in a car's FMOD bank and sets their volume
+    FmodBank.cs                           finds those sounds in a car's FMOD bank and sets their volume; lists a bank's layers
+    Show-CarSound.ps1                     lists what a car's sound is made of (events, sheets, RPM layers, samples, volumes)
   weather-menu/
     FH2WeatherMenu.cs, build.ps1          the time and weather menu and its build script
     FH2-Time-Weather-Menu-Guide.docx      its user guide
@@ -147,6 +148,10 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 ```
 
 Each car's sound is an FMOD bank (`Mount\media\audio\fmodanthem\durango\PG_<car>.bank`). The game sets `TurboUpgradeLevel`, `DSCUpgradeLevel` or `CSCUpgradeLevel` (1-3, the fitted part's level) from the car's upgrades; each of the car's events has a sheet per parameter holding nested events, which are the turbo and supercharger sounds. The tool sets those nested events' master-track volume (stock + your dB; `FmodBank.cs` has the format) and writes the bank to `Mount\mediapc`, from your own game's bank each time, so a re-run replaces the change; values you don't pass keep what was set before. FH2 plays the same turbo sounds for single and twin turbos, so `-Turbo` is both. Blow-off sounds (samples named bov / Blowoff / DumpValve) play on tracks of their own; `-BOV` sets those tracks' volume, on top of `-Turbo` where the track is inside a turbo sound (tracks that also play other samples are left alone: 3 cars). Of 351 car banks, 321 have turbo sounds, 312 BOV, 143 DSC and 99 CSC. Imported FM5 cars use the bank of the FH2 car their sound was borrowed from. What the tool wrote is listed in `Mount\mediapc\audio\fmodanthem\durango\boost-volume.json`; banks another mod put there are left alone.
+
+### What a car's sound is made of
+
+`.\tools\audio\Show-CarSound.ps1 -Car dart` lists every layer of a car's bank, per event: the parameter sheet it's on and where (RPM range on `EngineRPM`), its samples, its volume (dB; "auto" when a parameter drives it). Playground's names are the same in every bank: `Exhaust_<rpm>`, `Engine_<rpm>` and `Intake_<rpm>` are loops recorded at that RPM, crossfaded on `EngineRPM` sheets (`Exhaust_00720` is the idle); `Burble_A` plays off throttle (`Throttle` 0-0.1); `BackFire`, `Backfire_V` and `Backfire_POP_LFE` (low-frequency pop) are triggered; `WhistleLooping` / `AirLooping` follow `Boost`; `GTI_Shifter`, `PaddleShifter`, `ClutchPedal` and `TNS_damage` (missed shift) are the drivetrain noises. Other parameters the game sets: `PosTorque` / `NegTorque`, `Gear`, `View` / `Angle` (camera), reverb and wall distances.
 
 ## Time and weather menu
 
