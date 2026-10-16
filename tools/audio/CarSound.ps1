@@ -41,8 +41,8 @@ function Save-CarSoundManifest($ctx) {
   $old = Join-Path $ctx.OutDir 'boost-volume.json'; if (Test-Path $old) { Remove-Item $old }
 }
 
-function Test-GameRunning($ctx) {   # the game's Azimuth (any Azimuth when it isn't known)
-  [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $(if ($ctx.AzimuthRoot) { $_.Path.StartsWith($ctx.AzimuthRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) } else { $_.Path -like '*\azimuth.exe' }) })
+function Test-GameRunning($ctx) {   # any Azimuth: the remembered one may not be the one that runs this game folder
+  [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and ($_.Path -like '*\azimuth.exe' -or ($ctx.AzimuthRoot -and $_.Path.StartsWith($ctx.AzimuthRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase))) })
 }
 
 function Find-Cars($ctx, [string]$term) {

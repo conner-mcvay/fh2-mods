@@ -147,6 +147,7 @@ $reset.Add_Click({ foreach ($row in $rows.Values) { $row.Bar.Value = 0 }; $statu
 $revert.Add_Click({ Load-Car $script:car })
 
 $status.ForeColor = [Drawing.Color]::DimGray
+$form.Text = "FH2 car sound tuner - $($ctx.GameRoot)"
 $status.Text = "Game folder: $($ctx.GameRoot)   (* = tuned)"
 Fill-List
 [void]$form.ShowDialog()
