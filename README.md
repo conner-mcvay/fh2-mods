@@ -14,6 +14,7 @@ The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired:
 |---|---|
 | [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`). Release package: `tools\release\Make-ImporterRelease.ps1 -Version <x.y.z>`; user docs in `release/fm5-car-importer` |
 | [fh2net](tools/online) | Experimental online free roam over a LAN or the internet through a server you run. Release package: `tools\release\Make-NetRelease.ps1 -Version <x.y.z>`; user docs in `release/fh2net` |
+| [Turbo / supercharger volume](#turbo-and-supercharger-volume) | Makes any car's turbo, positive-displacement (DSC) or centrifugal (CSC) supercharger sound louder or quieter (double-click `Set-BoostVolume.cmd`) |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
 
 ## Layout
@@ -47,6 +48,9 @@ tools/
     WheelSwap.ps1                         shared wheel-shop helper (brands, names, wheel zips)
     ForzaModel.cs                         .modelbin (burG) reader/writer + structure check
     Fm5ModelConverter.cs                  converts FM5 car models/materials for FH2's shaders
+  audio/
+    Set-BoostVolume.ps1                   turbo / supercharger volume per car (Set-BoostVolume.cmd runs it)
+    FmodBank.cs                           finds those sounds in a car's FMOD bank and sets their volume
   weather-menu/
     FH2WeatherMenu.cs, build.ps1          the time and weather menu and its build script
     FH2-Time-Weather-Menu-Guide.docx      its user guide
@@ -130,6 +134,19 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 - gives FM5 window glass (`gls_window`, `gls_windsheild`, interior variants) FH2's material parameter override (`0xF2FDFE8E` = 0); without it panes aren't drawn
 - redirects car-local materials whose shader is FM5-compiled inside the car (missing FH2's `SimpleCarLightScenario`) to the FH2 library material of the same name minus the `CH1` tag (`gls_limotintCH1_001` -> `gls_limotint_001`)
 - re-checks every converted model's structure before packing
+
+## Turbo and supercharger volume
+
+**Double-click `Set-BoostVolume.cmd`**, type the cars (MediaNames like `FOR_MustangGT500_13`, wildcards like `*Mustang*`, or `all`) and the dB to add to each sound: turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is very loud. Close the game first.
+
+```powershell
+.\tools\audio\Set-BoostVolume.ps1 -Car FOR_MustangGT500_13 -DSC 12        # louder supercharger whine
+.\tools\audio\Set-BoostVolume.ps1 -Car all -Turbo 6 -DSC 6 -CSC 6          # every car
+.\tools\audio\Set-BoostVolume.ps1 -List -Car '*Mustang*'                   # which sounds each car has, what's set
+.\tools\audio\Set-BoostVolume.ps1 -Remove                                  # back to stock (or -Remove -Car ...)
+```
+
+Each car's sound is an FMOD bank (`Mount\media\audio\fmodanthem\durango\PG_<car>.bank`). The game sets `TurboUpgradeLevel`, `DSCUpgradeLevel` or `CSCUpgradeLevel` (1-3, the fitted part's level) from the car's upgrades; each of the car's events has a sheet per parameter holding nested events, which are the turbo and supercharger sounds. The tool sets those nested events' master-track volume (stock + your dB; `FmodBank.cs` has the format) and writes the bank to `Mount\mediapc`, from your own game's bank each time, so a re-run replaces the change; values you don't pass keep what was set before. FH2 plays the same turbo sounds for single and twin turbos, so `-Turbo` is both. Of 351 car banks, 321 have turbo sounds, 143 DSC and 99 CSC. Imported FM5 cars use the bank of the FH2 car their sound was borrowed from. What the tool wrote is listed in `Mount\mediapc\audio\fmodanthem\durango\boost-volume.json`; banks another mod put there are left alone.
 
 ## Time and weather menu
 
