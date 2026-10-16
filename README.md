@@ -14,7 +14,7 @@ The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired:
 |---|---|
 | [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`). Release package: `tools\release\Make-ImporterRelease.ps1 -Version <x.y.z>`; user docs in `release/fm5-car-importer` |
 | [fh2net](tools/online) | Experimental online free roam over a LAN or the internet through a server you run. Release package: `tools\release\Make-NetRelease.ps1 -Version <x.y.z>`; user docs in `release/fh2net` |
-| [Car sound tuner](#car-sound-tuner) | Sliders for any car's sound: exhaust, engine and intake volume, idle, highs, lows and grit, the sub-bass layer, backfires, turbo, superchargers, blow-off valve (double-click `Tune-CarSound.cmd`) |
+| [Car sound tuner](#car-sound-tuner) | Sliders for any car's sound: exhaust, engine and intake volume, idle, highs, lows and grit, the sub-bass layer, backfires, turbo, superchargers, blow-off valve (double-click `Tune-CarSound.cmd`). Release package: `toolselease\Make-SoundTunerRelease.ps1 -Version <x.y.z>`; user docs in `release/car-sound-tuner` |
 | [Turbo / supercharger volume](#turbo-and-supercharger-volume) | Makes any car's turbo, positive-displacement (DSC) or centrifugal (CSC) supercharger sound louder or quieter (double-click `Set-BoostVolume.cmd`) |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
 
@@ -39,6 +39,7 @@ tools/
     Install.ps1, Uninstall.ps1            bundled into every release zip
     Make-ImporterRelease.ps1              packages the FM5 car importer
     Make-NetRelease.ps1                   packages fh2net and its server
+    Make-SoundTunerRelease.ps1            packages the car sound tuner
   online/
     probe/                                fh2net (the Azimuth DLL; build.ps1 builds it with Zig 0.13)
     server/                               fh2srv.py, the game services + relay server

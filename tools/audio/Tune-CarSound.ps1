@@ -23,8 +23,33 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $script:k = [Drawing.Graphics]::FromHwnd([IntPtr]::Zero).DpiX / 96
 function P([double]$x, [double]$y) { New-Object Drawing.Point([int]($x * $script:k), [int]($y * $script:k)) }
 function Sz([double]$w, [double]$h) { New-Object Drawing.Size([int]($w * $script:k), [int]($h * $script:k)) }
-try { . (Join-Path $PSScriptRoot 'CarSound.ps1'); $ctx = Resolve-CarSoundFolders $GameRoot $AzimuthRoot }
-catch { [void][Windows.Forms.MessageBox]::Show("$_", 'FH2 car sound tuner'); return }   # (run from Tune-CarSound.cmd, there's no console)
+. (Join-Path $PSScriptRoot 'CarSound.ps1')
+
+# Asks for the Azimuth folder (and the game folder when Azimuth's settings don't name one) and remembers them.
+function Select-GameFolders($owner) {
+  $dlg = New-Object Windows.Forms.FolderBrowserDialog -Property @{ ShowNewFolderButton = $false
+    Description = 'Pick your Azimuth folder: the one with azimuth.exe in it.' }
+  while ($true) {
+    if ($dlg.ShowDialog($owner) -ne 'OK') { return $null }
+    $az = $dlg.SelectedPath
+    if (-not (Test-Path (Join-Path $az 'azimuth.exe'))) { [void][Windows.Forms.MessageBox]::Show($owner, "There's no azimuth.exe in`n$az", 'FH2 car sound tuner'); continue }
+    $game = Get-AzimuthGameFolder $az
+    if (-not $game -or -not (Test-Path (Join-Path $game 'Mount\forza_durango_release_final.exe'))) {
+      $g = New-Object Windows.Forms.FolderBrowserDialog -Property @{ ShowNewFolderButton = $false
+        Description = 'Now pick the Forza Horizon 2 game folder (Anthem_1.0.0.64_x64__8wekyb3d8bbwe, with Mount inside).' }
+      if ($g.ShowDialog($owner) -ne 'OK') { return $null }
+      $game = $g.SelectedPath
+      if (-not (Test-Path (Join-Path $game 'Mount\forza_durango_release_final.exe'))) { [void][Windows.Forms.MessageBox]::Show($owner, "That isn't the FH2 game folder (no Mount\forza_durango_release_final.exe):`n$game", 'FH2 car sound tuner'); continue }
+    }
+    try { $c = Resolve-CarSoundFolders $game $az } catch { [void][Windows.Forms.MessageBox]::Show($owner, "$_", 'FH2 car sound tuner'); continue }
+    Save-GameFolders $az $game
+    return $c
+  }
+}
+
+# (run from Tune-CarSound.cmd there's no console: problems show as message boxes)
+try { $ctx = Resolve-CarSoundFolders $GameRoot $AzimuthRoot; if (-not $ctx.AzimuthRoot) { throw 'no Azimuth folder' } }
+catch { $ctx = Select-GameFolders $null; if (-not $ctx) { return } }
 
 # slider: setting, label, tab, minimum, maximum (in the setting's units), what it does
 $sliders = @(
@@ -66,11 +91,13 @@ $tabs = New-Object Windows.Forms.TabControl -Property @{ Location = (P 280 62); 
 $apply = New-Object Windows.Forms.Button -Property @{ Text = 'Apply'; Location = (P 280 494); Size = (Sz 110 30); Anchor = 'Bottom,Left'; Enabled = $false }
 $reset = New-Object Windows.Forms.Button -Property @{ Text = 'Reset to stock'; Location = (P 398 494); Size = (Sz 120 30); Anchor = 'Bottom,Left'; Enabled = $false }
 $revert = New-Object Windows.Forms.Button -Property @{ Text = 'Revert'; Location = (P 526 494); Size = (Sz 90 30); Anchor = 'Bottom,Left'; Enabled = $false }
+$folders = New-Object Windows.Forms.Button -Property @{ Text = 'Folders...'; Location = (P 792 494); Size = (Sz 100 30); Anchor = 'Bottom,Right' }
 $status = New-Object Windows.Forms.Label -Property @{ Location = (P 280 534); Size = (Sz 612 40); Anchor = 'Bottom,Left,Right' }
+$tip.SetToolTip($folders, 'Pick the Azimuth folder (and the game folder) to tune.')
 $tip.SetToolTip($apply, 'Write the car''s sound with these settings (close the game first). Start the game to hear it.')
 $tip.SetToolTip($reset, 'Set every slider to 0 (then Apply to put the car back to stock).')
 $tip.SetToolTip($revert, 'Back to what''s applied now.')
-$form.Controls.AddRange(@($searchLabel, $search, $list, $title, $info, $tabs, $apply, $reset, $revert, $status))
+$form.Controls.AddRange(@($searchLabel, $search, $list, $title, $info, $tabs, $apply, $reset, $revert, $folders, $status))
 
 $rows = @{}   # setting -> @{ Bar; Value; Name; Min }
 $pages = [ordered]@{}
@@ -142,6 +169,17 @@ $apply.Add_Click({
     [void][Windows.Forms.MessageBox]::Show($form, "The game is running, so nothing was written.`n`nClose the game, then press Apply again.", 'FH2 car sound tuner', 'OK', 'Warning')
     return
   }
+  $eo = Get-ExtraOptionsState $ctx
+  if ($eo.Known -and -not $eo.Installed) {
+    $status.Text = 'Not applied: needs FH2 Extra Options 0.2.74 or later.'
+    [void][Windows.Forms.MessageBox]::Show($form, "Extra Options 0.2.74 or later isn't installed in`n$($ctx.AzimuthRoot)`n`nIt's what makes the game read changed sounds (from Mount\mediapc). Install it, then Apply again.", 'FH2 car sound tuner', 'OK', 'Warning')
+    return
+  }
+  if ($eo.Known -and -not $eo.OverridesOn) {
+    $a = [Windows.Forms.MessageBox]::Show($form, "Extra Options' [Files] EnableMediaOverrides is off, so the game won't read changed sounds.`n`nTurn it on now? (Your FH2_ExtraOptions.ini is kept as FH2_ExtraOptions.ini.before-car-sound.)", 'FH2 car sound tuner', 'YesNo', 'Question')
+    if ($a -ne 'Yes') { $status.Text = 'Not applied: EnableMediaOverrides is off.'; return }
+    Enable-MediaOverrides $ctx
+  }
   $s = @{}; foreach ($k in $rows.Keys) { $s[$k] = $rows[$k].Bar.Value / 2.0 }
   try {
     $form.Cursor = 'WaitCursor'
@@ -154,8 +192,22 @@ $apply.Add_Click({
 $reset.Add_Click({ foreach ($row in $rows.Values) { $row.Bar.Value = 0 }; $status.Text = 'All sliders at 0: Apply to put the car back to stock.'; $status.ForeColor = [Drawing.Color]::DimGray })
 $revert.Add_Click({ Load-Car $script:car })
 
-$status.ForeColor = [Drawing.Color]::DimGray
-$form.Text = "FH2 car sound tuner - $($ctx.GameRoot)"
-$status.Text = "Game folder: $($ctx.GameRoot)   (* = tuned)"
+function Show-Folders {   # the game folder in the title and status line, and whether Extra Options is ready
+  $form.Text = "FH2 car sound tuner - $($ctx.GameRoot)"
+  $eo = Get-ExtraOptionsState $ctx
+  $status.ForeColor = $(if ($eo.Known -and (-not $eo.Installed -or -not $eo.OverridesOn)) { [Drawing.Color]::DarkOrange } else { [Drawing.Color]::DimGray })
+  $status.Text = "Game folder: $($ctx.GameRoot)   (* = tuned)" + $(
+    if (-not $eo.Known) { '' } elseif (-not $eo.Installed) { "`nExtra Options 0.2.74+ isn't installed in Azimuth: changes won't be heard until it is." }
+    elseif (-not $eo.OverridesOn) { "`nExtra Options' EnableMediaOverrides is off: Apply offers to turn it on." } else { '' })
+}
+$folders.Add_Click({
+  $c = Select-GameFolders $form
+  if (-not $c) { return }
+  $script:ctx = $c; $script:car = $null; $script:bank = $null
+  foreach ($row in $rows.Values) { $script:loading = $true; $row.Bar.Value = 0; $row.Bar.Enabled = $false; $script:loading = $false; Format-Row $row }
+  $search.Text = ''; Fill-List; Show-Folders; Update-Buttons
+})
+
+Show-Folders
 Fill-List
 [void]$form.ShowDialog()

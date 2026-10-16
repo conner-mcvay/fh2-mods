@@ -34,6 +34,45 @@ function Resolve-CarSoundFolders([string]$GameRoot, [string]$AzimuthRoot, [switc
   $ctx
 }
 
+function Get-AzimuthGameFolder([string]$AzimuthRoot) {   # Azimuth's game_folder, or $null
+  $ini = Join-Path $AzimuthRoot 'data\azimuth.ini'
+  if (-not (Test-Path $ini)) { return $null }
+  $m = [regex]::Match((Get-Content $ini -Raw), '(?m)^game_folder=(.+?)\s*$'); if ($m.Success) { $m.Groups[1].Value }
+}
+
+function Save-GameFolders([string]$AzimuthRoot, [string]$GameRoot) {   # remembered with the FM5 importer's settings
+  $p = Join-Path $env:LOCALAPPDATA 'fh2-mods\import-fm5-cars.json'
+  $j = if (Test-Path $p) { Get-Content $p -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
+  foreach ($kv in @{ AzimuthRoot = $AzimuthRoot; GameRoot = $GameRoot }.GetEnumerator()) {
+    if ($j.PSObject.Properties[$kv.Key]) { $j.($kv.Key) = $kv.Value } else { $j | Add-Member $kv.Key $kv.Value }
+  }
+  New-Item -ItemType Directory (Split-Path $p) -Force | Out-Null
+  $j | ConvertTo-Json | Set-Content $p -Encoding UTF8
+}
+
+# Extra Options 0.2.74+ makes the game read Mount\mediapc, with [Files] EnableMediaOverrides=1 in its ini. Its DLL is
+# data\bin\azimuth-tls.dll, or azimuth-tls-next.dll when another DLL (fh2net) sits in front of it.
+function Get-ExtraOptionsState($ctx) {
+  if (-not $ctx.AzimuthRoot) { return [pscustomobject]@{ Known = $false; Installed = $false; OverridesOn = $false; Ini = $null } }
+  $bin = Join-Path $ctx.AzimuthRoot 'data\bin'
+  $eo = @('azimuth-tls.dll', 'azimuth-tls-next.dll' | ForEach-Object { Join-Path $bin $_ } | Where-Object {
+    (Test-Path -LiteralPath $_) -and [IO.File]::ReadAllText($_, [Text.Encoding]::ASCII).Contains('game:\mediapc\') })
+  $ini = Join-Path $bin 'FH2_ExtraOptions.ini'
+  $text = if (Test-Path -LiteralPath $ini) { [IO.File]::ReadAllText($ini) } else { '' }
+  [pscustomobject]@{ Known = $true; Installed = [bool]$eo; Ini = $ini
+    OverridesOn = [regex]::IsMatch($text, '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$') }
+}
+
+function Enable-MediaOverrides($ctx) {   # sets [Files] EnableMediaOverrides=1; the ini as it was is kept next to it
+  $ini = (Get-ExtraOptionsState $ctx).Ini
+  $text = if (Test-Path -LiteralPath $ini) { [IO.File]::ReadAllText($ini) } else { '' }
+  if ((Test-Path -LiteralPath $ini) -and -not (Test-Path -LiteralPath "$ini.before-car-sound")) { Copy-Item -LiteralPath $ini "$ini.before-car-sound" }
+  if ([regex]::IsMatch($text, '(?m)^\s*EnableMediaOverrides\s*=')) { $text = [regex]::Replace($text, '(?m)^(\s*EnableMediaOverrides\s*=\s*)\S*', '${1}1') }
+  elseif ([regex]::IsMatch($text, '(?m)^\s*\[Files\]')) { $text = [regex]::Replace($text, '(?m)^(\s*\[Files\][^\r\n]*\r?\n)', "`${1}EnableMediaOverrides=1`r`n") }
+  else { $text = $text.TrimEnd() + "`r`n`r`n[Files]`r`n; Mount\mediaoverride and Mount\mediapc override game:\media (mods install into mediapc)`r`nEnableMediaOverrides=1`r`n" }
+  [IO.File]::WriteAllText($ini, $text, (New-Object Text.UTF8Encoding $false))
+}
+
 function Save-CarSoundManifest($ctx) {
   $p = Join-Path $ctx.OutDir 'car-sound.json'
   if ($ctx.Manifest.Count) { New-Item -ItemType Directory $ctx.OutDir -Force | Out-Null; [pscustomobject]$ctx.Manifest | ConvertTo-Json -Depth 3 | Set-Content $p -Encoding UTF8 }
