@@ -129,14 +129,18 @@ $list.Add_SelectedIndexChanged({ if ($list.SelectedItem) { Load-Car (($list.Sele
 
 $apply.Add_Click({
   $status.ForeColor = [Drawing.Color]::Firebrick
-  if (Test-GameRunning $ctx) { $status.Text = 'Close the game first, then Apply.'; return }
+  if (Test-GameRunning $ctx) {
+    $status.Text = 'Not applied: close the game first, then Apply.'
+    [void][Windows.Forms.MessageBox]::Show($form, "The game is running, so nothing was written.`n`nClose the game, then press Apply again.", 'FH2 car sound tuner', 'OK', 'Warning')
+    return
+  }
   $s = @{}; foreach ($k in $rows.Keys) { $s[$k] = $rows[$k].Bar.Value / 2.0 }
   try {
     $form.Cursor = 'WaitCursor'
     $r = Write-CarSound $ctx $script:car $s
     $status.ForeColor = [Drawing.Color]::DarkGreen; $status.Text = "$r. Start the game to hear it."
     $c = $script:car; Fill-List; $i = [array]::IndexOf(@($list.Items | ForEach-Object { $_ -replace '\s+\*$', '' }), $c); if ($i -ge 0) { $list.SelectedIndex = $i }
-  } catch { $status.Text = "$_" } finally { $form.Cursor = 'Default' }
+  } catch { $status.Text = "Not applied: $_"; [void][Windows.Forms.MessageBox]::Show($form, "Not applied:`n`n$_", 'FH2 car sound tuner', 'OK', 'Error') } finally { $form.Cursor = 'Default' }
   Update-Buttons
 })
 $reset.Add_Click({ foreach ($row in $rows.Values) { $row.Bar.Value = 0 }; $status.Text = 'All sliders at 0: Apply to put the car back to stock.'; $status.ForeColor = [Drawing.Color]::DimGray })
