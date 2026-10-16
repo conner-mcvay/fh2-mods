@@ -11,17 +11,25 @@
 // event it plays); those nested events hold the turbo / supercharger sounds. Their master track (the EVNT's GUID at
 // 64) is an MBUS whose 19-byte BUS chunk keeps its volume in dB as a float at byte 11, which nothing automates:
 // that is the volume this changes.
+//
+// Blow-off valve (BOV): the samples named bov / Blowoff / DumpValve (names in the bank's FSB5 sample table; a WAV
+// record is a GUID and the sample index at byte 22) play from multi-instruments on tracks of their own: event
+// group buses (GBUS) with the same 19-byte BUS volume. An instrument's track is the GUID after 0x18 0x00 at byte 81
+// of its INST chunk (a multi-instrument's children have none; the multi-instrument has it). Tracks holding only
+// blow-off samples are the BOV sounds; a track that mixes in anything else is left alone.
 using System; using System.Collections.Generic; using System.IO; using System.Linq; using System.Text;
+using System.Text.RegularExpressions;
 
 public class FmodBankSound {
-  public string Kind;          // Turbo, DSC or CSC
-  public string Range;         // the upgrade levels it plays at, e.g. "1-3"
+  public string Kind;          // Turbo, DSC, CSC or BOV
+  public string Range;         // the upgrade levels it plays at, e.g. "1-3" (BOV: "")
   public int VolumeOffset;     // file offset of the master track's volume (float, dB)
   public float StockVolume;    // dB
 }
 
 public class FmodBank {
-  public static readonly string[] Kinds = { "Turbo", "DSC", "CSC" };
+  public static readonly string[] Kinds = { "Turbo", "DSC", "CSC" };   // the upgrade-level parameters (BOV is by sample)
+  static readonly Regex BovSample = new Regex("bov|blow|dump", RegexOptions.IgnoreCase);
   public byte[] Data;
   public List<FmodBankSound> Sounds = new List<FmodBankSound>();
   public List<string> Skipped = new List<string>();   // sheets items that weren't the expected shape
@@ -86,6 +94,64 @@ public class FmodBank {
         i += 23;
       }
     }
+    FindBlowOff(sec);
+  }
+
+  // GUIDs (as Guid16 strings) found anywhere in a record's bytes, from the given set
+  List<string> GuidsIn(Chunk c, ICollection<string> keys) {
+    var found = new List<string>(); var keyBytes = new HashSet<string>(keys);
+    for (int i = c.Offset + 8; i + 16 <= c.Offset + 8 + c.Size; i++) { string g = Guid16(i); if (keyBytes.Contains(g)) found.Add(g); }
+    return found;
+  }
+
+  void FindBlowOff(Func<string, List<Chunk>> sec) {
+    // sample names (FSB5: version, sample count at 8, sample-header size at 12; names after the 60-byte header and the sample headers)
+    int fsb = IndexOf(Encoding.ASCII.GetBytes("FSB5"));
+    if (fsb < 0 || BitConverter.ToInt32(Data, fsb + 4) != 1) return;
+    int count = BitConverter.ToInt32(Data, fsb + 8), names = fsb + 60 + BitConverter.ToInt32(Data, fsb + 12);
+    var sampleName = new string[count];
+    for (int k = 0; k < count; k++) {
+      int o = names + BitConverter.ToInt32(Data, names + 4 * k), e = Array.IndexOf(Data, (byte)0, o);
+      sampleName[k] = Encoding.ASCII.GetString(Data, o, e - o);
+    }
+    var wav = new Dictionary<string, string>();
+    foreach (var w in sec("WAVS")) { int idx = BitConverter.ToInt32(Data, w.Offset + 8 + 22); if (idx >= 0 && idx < count) wav[RecordGuid(w)] = sampleName[idx]; }
+    var inst = new Dictionary<string, Chunk>();
+    foreach (var s in new[] { "WAIS", "MUIS", "SPIS", "PRIS", "EVIS" }) foreach (var c in sec(s)) inst[RecordGuid(c)] = c;
+    var tracks = new Dictionary<string, Chunk>(); foreach (var c in sec("GBSS")) tracks[RecordGuid(c)] = c;
+
+    var memo = new Dictionary<string, HashSet<string>>();
+    Func<string, int, HashSet<string>> samples = null;   // sample names an instrument plays (through a multi-instrument's children)
+    samples = (g, depth) => {
+      HashSet<string> s; if (memo.TryGetValue(g, out s)) return s;
+      s = new HashSet<string>(); memo[g] = s;
+      var c = inst[g];
+      foreach (var w in GuidsIn(c, wav.Keys)) s.Add(wav[w]);
+      if (depth < 4) foreach (var child in GuidsIn(c, inst.Keys)) if (child != g) s.UnionWith(samples(child, depth + 1));
+      return s;
+    };
+    var onTrack = new Dictionary<string, HashSet<string>>();
+    foreach (var kv in inst) {
+      var ic = Kids(kv.Value).FirstOrDefault(k => k.Id == "INST");
+      if (ic.Id != "INST" || ic.Size < 99 || Data[ic.Offset + 8 + 81] != 0x18 || Data[ic.Offset + 8 + 82] != 0) continue;
+      string t = Guid16(ic.Offset + 8 + 83); if (!tracks.ContainsKey(t)) continue;
+      HashSet<string> set; if (!onTrack.TryGetValue(t, out set)) onTrack[t] = set = new HashSet<string>();
+      set.UnionWith(samples(kv.Key, 0));
+    }
+    foreach (var kv in onTrack) {
+      var bov = kv.Value.Where(n => BovSample.IsMatch(n)).ToList();
+      if (bov.Count == 0) continue;
+      if (bov.Count != kv.Value.Count) { Skipped.Add("BOV track also plays " + string.Join(", ", kv.Value.Except(bov))); continue; }
+      var bus = Kids(tracks[kv.Key]).FirstOrDefault(c => c.Id == "BUS ");
+      if (bus.Id != "BUS " || bus.Size != 19) { Skipped.Add("BOV track with effects or automation"); continue; }
+      int at = bus.Offset + 8 + 11;
+      Sounds.Add(new FmodBankSound { Kind = "BOV", Range = "", VolumeOffset = at, StockVolume = BitConverter.ToSingle(Data, at) });
+    }
+  }
+
+  int IndexOf(byte[] s) {
+    for (int i = 0; i + s.Length <= Data.Length; i++) { int j = 0; while (j < s.Length && Data[i + j] == s[j]) j++; if (j == s.Length) return i; }
+    return -1;
   }
 
   // Raises (or lowers) the sounds of each kind by gain[kind] dB from their stock volume; returns how many changed.

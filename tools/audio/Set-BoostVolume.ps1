@@ -10,6 +10,9 @@
   which Extra Options (0.2.74+, [Files] EnableMediaOverrides=1) makes the game read first. The game's own files are
   not changed.
 
+  The blow-off valve (BOV) sounds have their own tracks, set with -BOV; where they're part of the turbo sound, -Turbo
+  raises them too and -BOV adds on top.
+
   FH2 plays the same turbo sounds for single and twin turbos, so -Turbo covers both. Not every car has every sound
   (-List shows which do). Imported FM5 cars use the FH2 car their sound was borrowed from.
 
@@ -30,6 +33,7 @@ param(
   [double]$Turbo = 0,         # dB to add to the turbo sounds (-80 to 24; 0 = leave as stock)
   [double]$DSC = 0,           # dB to add to the positive-displacement supercharger sounds
   [double]$CSC = 0,           # dB to add to the centrifugal supercharger sounds
+  [double]$BOV = 0,           # dB to add to the blow-off valve sounds (on top of -Turbo where they're part of the turbo sound)
   [switch]$List,              # show which cars have which sounds, and what this tool has set
   [switch]$Remove,            # delete the banks this tool wrote (all, or -Car's)
   [string]$GameRoot,          # FH2 folder containing Mount (default: Azimuth's game_folder, as the importer remembers it)
@@ -86,7 +90,7 @@ function Resolve-Cars([string[]]$names) {
 }
 function Read-Bank([string]$c) { New-Object FmodBank (, [IO.File]::ReadAllBytes((Join-Path $stockDir "PG_$c.bank"))) }
 function Kinds-Of($bank) { ($bank.Sounds | Group-Object Kind | ForEach-Object { "$($_.Name) x$($_.Count)" }) -join ', ' }
-function Set-Of([string]$c) { $s = $manifest[$c]; if ($s) { "set: Turbo $($s.Turbo), DSC $($s.DSC), CSC $($s.CSC) dB" } }
+function Set-Of([string]$c) { $s = $manifest[$c]; if ($s) { "set: Turbo $($s.Turbo), DSC $($s.DSC), CSC $($s.CSC), BOV $(0 + $s.BOV) dB" } }
 
 $interactiveGiven = @()
 if ($interactive) {
@@ -120,7 +124,7 @@ if ($interactive) {
   }
   $Car = $picked
   Write-Host "`ndB to add to each sound (0 = stock; +6 is about twice as loud, +24 is very loud; up to 24). Enter keeps each car's current setting."
-  foreach ($k in @(@('Turbo', 'Turbo (single and twin)'), @('DSC', 'Positive-displacement supercharger (DSC)'), @('CSC', 'Centrifugal supercharger (CSC)'))) {
+  foreach ($k in @(@('Turbo', 'Turbo (single and twin)'), @('DSC', 'Positive-displacement supercharger (DSC)'), @('CSC', 'Centrifugal supercharger (CSC)'), @('BOV', 'Blow-off valve (BOV)'))) {
     $a = Ask "  $($k[1])"
     if ($a) { Set-Variable $k[0] ([double]$a); $interactiveGiven += $k[0] }
   }
@@ -152,20 +156,20 @@ if ($Remove) {
   return
 }
 
-foreach ($g in $Turbo, $DSC, $CSC) { if ($g -lt -80 -or $g -gt 24) { throw 'Gains must be between -80 and 24 dB' } }
+foreach ($g in $Turbo, $DSC, $CSC, $BOV) { if ($g -lt -80 -or $g -gt 24) { throw 'Gains must be between -80 and 24 dB' } }
 # the kinds given now; the others keep what this tool set before (so -Turbo later doesn't undo an earlier -DSC)
-$given = @('Turbo', 'DSC', 'CSC' | Where-Object { $interactiveGiven -contains $_ -or $PSBoundParameters.ContainsKey($_) })
-if (-not $given) { throw 'Pass -Turbo, -DSC and/or -CSC (dB to add; 0 = stock), or -Remove' }
+$given = @('Turbo', 'DSC', 'CSC', 'BOV' | Where-Object { $interactiveGiven -contains $_ -or $PSBoundParameters.ContainsKey($_) })
+if (-not $given) { throw 'Pass -Turbo, -DSC, -CSC and/or -BOV (dB to add; 0 = stock), or -Remove' }
 $ini = if ($AzimuthRoot) { Join-Path $AzimuthRoot 'data\bin\FH2_ExtraOptions.ini' }
 if ($ini -and (Test-Path $ini) -and (Get-Content $ini -Raw) -notmatch '(?m)^\s*EnableMediaOverrides\s*=\s*1') {
   Write-Warning "Extra Options' [Files] EnableMediaOverrides isn't 1 in $ini; the game won't read Mount\mediapc until it is (the FM5 car importer turns it on)."
 }
 New-Item -ItemType Directory $outDir -Force | Out-Null
-$asked = @{ Turbo = $Turbo; DSC = $DSC; CSC = $CSC }
+$asked = @{ Turbo = $Turbo; DSC = $DSC; CSC = $CSC; BOV = $BOV }
 $done = 0
 foreach ($c in $cars) {
   $gain = New-Object 'System.Collections.Generic.Dictionary[string,float]'
-  foreach ($k in 'Turbo', 'DSC', 'CSC') { $gain[$k] = $(if ($given -contains $k) { $asked[$k] } elseif ($manifest.ContainsKey($c)) { $manifest[$c].$k } else { 0 }) }
+  foreach ($k in 'Turbo', 'DSC', 'CSC', 'BOV') { $gain[$k] = $(if ($given -contains $k) { $asked[$k] } elseif ($manifest.ContainsKey($c)) { 0 + $manifest[$c].$k } else { 0 }) }
   $b = Read-Bank $c
   foreach ($s in $b.Skipped) { Write-Warning "$c $s; left as it is" }
   $n = $b.Apply($gain)
@@ -176,14 +180,14 @@ foreach ($c in $cars) {
   if (-not $n) {   # nothing of the asked kinds: stock again
     if ($manifest.ContainsKey($c)) { if (Test-Path $out) { Remove-Item $out }; $manifest.Remove($c) }
     if ($cars.Count -le 5) {
-      $want = @('Turbo', 'DSC', 'CSC' | Where-Object { $gain[$_] })
+      $want = @('Turbo', 'DSC', 'CSC', 'BOV' | Where-Object { $gain[$_] })
       Write-Host $(if ($want) { "$c has no $($want -join '/') sounds ($(if ($b.Sounds.Count) { Kinds-Of $b } else { 'none' }))" } else { "$c is stock" })
     }
     continue
   }
   [IO.File]::WriteAllBytes("$out.fh2-new", $b.Data); Move-Item -Force "$out.fh2-new" $out
-  $manifest[$c] = [pscustomobject]@{ Turbo = $gain['Turbo']; DSC = $gain['DSC']; CSC = $gain['CSC']; sha256 = (Sha $out) }
-  Write-Host ("{0,-34} Turbo {1}, DSC {2}, CSC {3} dB: {4} sound(s) changed (has {5})" -f $c, $gain['Turbo'], $gain['DSC'], $gain['CSC'], $n, (Kinds-Of $b))
+  $manifest[$c] = [pscustomobject]@{ Turbo = $gain['Turbo']; DSC = $gain['DSC']; CSC = $gain['CSC']; BOV = $gain['BOV']; sha256 = (Sha $out) }
+  Write-Host ("{0,-34} Turbo {1}, DSC {2}, CSC {3}, BOV {4} dB: {5} sound(s) changed (has {6})" -f $c, $gain['Turbo'], $gain['DSC'], $gain['CSC'], $gain['BOV'], $n, (Kinds-Of $b))
   $done++
 }
 Save-Manifest

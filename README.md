@@ -137,7 +137,7 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 
 ## Turbo and supercharger volume
 
-**Double-click `Set-BoostVolume.cmd`**, pick the cars (type part of a name like `mustang` and pick numbers from the list of matches, which shows each car's sounds and current setting; or `all`) and type the dB to add to each sound (Enter keeps the current setting): turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is very loud. Close the game first.
+**Double-click `Set-BoostVolume.cmd`**, pick the cars (type part of a name like `mustang` and pick numbers from the list of matches, which shows each car's sounds and current setting; or `all`) and type the dB to add to each sound (Enter keeps the current setting), including the blow-off valve (BOV): turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is very loud. Close the game first.
 
 ```powershell
 .\tools\audio\Set-BoostVolume.ps1 -Car FOR_MustangGT500_13 -DSC 12        # louder supercharger whine
@@ -146,7 +146,7 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 .\tools\audio\Set-BoostVolume.ps1 -Remove                                  # back to stock (or -Remove -Car ...)
 ```
 
-Each car's sound is an FMOD bank (`Mount\media\audio\fmodanthem\durango\PG_<car>.bank`). The game sets `TurboUpgradeLevel`, `DSCUpgradeLevel` or `CSCUpgradeLevel` (1-3, the fitted part's level) from the car's upgrades; each of the car's events has a sheet per parameter holding nested events, which are the turbo and supercharger sounds. The tool sets those nested events' master-track volume (stock + your dB; `FmodBank.cs` has the format) and writes the bank to `Mount\mediapc`, from your own game's bank each time, so a re-run replaces the change; values you don't pass keep what was set before. FH2 plays the same turbo sounds for single and twin turbos, so `-Turbo` is both. Of 351 car banks, 321 have turbo sounds, 143 DSC and 99 CSC. Imported FM5 cars use the bank of the FH2 car their sound was borrowed from. What the tool wrote is listed in `Mount\mediapc\audio\fmodanthem\durango\boost-volume.json`; banks another mod put there are left alone.
+Each car's sound is an FMOD bank (`Mount\media\audio\fmodanthem\durango\PG_<car>.bank`). The game sets `TurboUpgradeLevel`, `DSCUpgradeLevel` or `CSCUpgradeLevel` (1-3, the fitted part's level) from the car's upgrades; each of the car's events has a sheet per parameter holding nested events, which are the turbo and supercharger sounds. The tool sets those nested events' master-track volume (stock + your dB; `FmodBank.cs` has the format) and writes the bank to `Mount\mediapc`, from your own game's bank each time, so a re-run replaces the change; values you don't pass keep what was set before. FH2 plays the same turbo sounds for single and twin turbos, so `-Turbo` is both. Blow-off sounds (samples named bov / Blowoff / DumpValve) play on tracks of their own; `-BOV` sets those tracks' volume, on top of `-Turbo` where the track is inside a turbo sound (tracks that also play other samples are left alone: 3 cars). Of 351 car banks, 321 have turbo sounds, 312 BOV, 143 DSC and 99 CSC. Imported FM5 cars use the bank of the FH2 car their sound was borrowed from. What the tool wrote is listed in `Mount\mediapc\audio\fmodanthem\durango\boost-volume.json`; banks another mod put there are left alone.
 
 ## Time and weather menu
 
