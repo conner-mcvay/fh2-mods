@@ -176,6 +176,9 @@ foreach ($t in $sel.Keys) {
   $rows = & $Sqlite -bail ':memory:' @attach '.headers on' ".mode insert $fhName" "SELECT $colList FROM fm.[$t] s WHERE ($where) AND $newCond"
   if ($LASTEXITCODE -ne 0) { throw "export of $t failed" }
   $rows = @($rows | Where-Object { $_ } | ForEach-Object { $_.TrimEnd("`r") })
+  # rows other cars can share (engines, drivetrains, bodies, their parts, torque curves, lookups) come from FM5 the
+  # same for every car: when several cars are built together, the first one's copy stands
+  if ($pk.Count -and $fhName -ne 'Data_Car') { $rows = @($rows | ForEach-Object { $_ -replace '^INSERT INTO ', 'INSERT OR IGNORE INTO ' }) }
   if ($rows.Count) {
     $counts[$fhName] = $rows.Count
     [void]$sb.AppendLine("-- $fhName")
@@ -237,7 +240,8 @@ foreach ($en in $engines) {
   if ($EngineSound) {
     # FH2 sound (the donor's unless -EngineSound): FM5 banks renamed PG_<engine>.bank turned out silent for the Trans Am
     if (-not $banks.ContainsKey($EngineSound.ToLower())) { throw "FH2 has no PG_$EngineSound.bank to borrow" }
-    [void]$sb.AppendLine("UPDATE Data_Engine SET MediaName = '$EngineSound' WHERE EngineID = $en;   -- engine sound borrowed from FH2")
+    # (only while it has FM5's sound: an engine shared with a car built before this one keeps that car's)
+    [void]$sb.AppendLine("UPDATE Data_Engine SET MediaName = '$EngineSound' WHERE EngineID = $en AND MediaName = '$($em.Replace("'", "''"))';   -- engine sound borrowed from FH2")
     $report += "sound   engine $en ($em) -> FH2 $EngineSound"
   } elseif (Test-Path (Join-Path $Fm5Media "audio\fmod\durango\$em.bank")) {
     # FH2 loads PG_<engine>.bank; the GT500 import used FM5's bank under that name (not confirmed audible)

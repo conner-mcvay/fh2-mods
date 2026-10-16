@@ -196,6 +196,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 | Parameter | |
 |---|---|
 | `-ListFm5Only` | list the FM5 cars FH2 doesn't have, and stop |
+| `-ExportList <file>` | write the imported cars installed in this game to a file (JSON), and stop |
+| `-FromList <file>` | import the cars in such a file with the same choices; cars the game already has are skipped. `-Yes` skips the confirmation |
 | `-Car` | FM5 car names (`MediaName`) or Ids |
 | `-Donor` | data donors; `""` = automatic (same make, nearest year) |
 | `-SoundCar` / `-EngineSound` | sound donor car, or an FH2 engine name directly |
@@ -204,6 +206,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 | `-Name` | layer name (default `fm5-cars`) |
 | `-NoInstall` | build only, to `build\<Name>` (lights need the cars installed, so they're skipped) |
 | `-Sqlite` | use this `sqlite3.exe` instead of downloading one |
+
+### Moving your imports to another PC
+
+`-ExportList` reads each run's `cars.json` in `mod-backups` and the installed cars (whether their night lights are fitted, and with whiter headlights), so the list matches what's in your game. Each entry:
+
+```json
+{ "car": "CHE_CorvetteZ06_02", "donor": "CHE_CorvetteZR1_09", "soundCar": "CHE_CorvetteStingray_14",
+  "engine": "CHE_CorvetteStingray_14", "group": null, "groupId": null,
+  "lightDonor": "CHE_CorvetteZR1_95", "whiter": false, "headlightStyle": "outer-bulb",
+  "presetFrom": "PON_TransAmGTA_87", "headlightColor": "1,0.95,0.85", "graphFrom": null }
+```
+
+`group`/`groupId` empty means the data donor's group; the light fields are `Add-CarLights.ps1`'s options ([6](#6-night-lights-tuning-and-fixes)). Cars you imported or lit by hand (with `Export-Fm5Car.ps1`, `Build-Mod.ps1` or `Add-CarLights.ps1` yourself) aren't in any `cars.json`: add or fix their entries in the file before importing it. `-FromList` imports the cars in the file's order and fits all their lights afterwards, so a `graphFrom` car can be in the same list.
 
 ## 9. Troubleshooting
 

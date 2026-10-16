@@ -40,7 +40,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $tools = $PSScriptRoot; $root = Split-Path (Split-Path $tools); $bin = Join-Path (Split-Path $tools) 'bin'
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-if (-not ('LightsFile' -as [type])) { Add-Type -Path (Join-Path $tools 'ForzaModel.cs'), (Join-Path $tools 'CarLights.cs') -ReferencedAssemblies System.Core }
+# the model code is shared with Build-Mod's converter, which may run first in the same session: both load all three
+if (-not ('BurgBlob' -as [type])) {
+  Add-Type -Path (Join-Path $tools 'ForzaModel.cs'), (Join-Path $tools 'Fm5ModelConverter.cs'), (Join-Path $tools 'CarLights.cs') -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
+}
 $settingsPath = Join-Path $env:LOCALAPPDATA 'fh2-mods\import-fm5-cars.json'
 $saved = if (Test-Path $settingsPath) { Get-Content $settingsPath -Raw | ConvertFrom-Json } else { [pscustomobject]@{} }
 if (-not $GameRoot) { $GameRoot = $saved.GameRoot }; if (-not $AzimuthRoot) { $AzimuthRoot = $saved.AzimuthRoot }

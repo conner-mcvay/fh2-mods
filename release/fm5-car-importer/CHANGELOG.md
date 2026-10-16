@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.1.0 (2026-10-16)
+
+- `-ExportList <file>` writes the imported cars installed in a game, with all their choices, and `-FromList <file>` imports them on another PC (cars it already has are skipped). See the README's "Same cars on another PC".
+- `cars.json` now also records the Autoshow group Id, whiter headlights and the light options.
+
 ## 2.0.0 (2026-10-15)
 
 - Now for **Azimuth 0.9.9** with **FH2 Extra Options 0.2.74+**. Imports install into `Mount\mediapc`, which Extra Options mounts over the game's media (`[Files] EnableMediaOverrides=1`, turned on by the installer). The game's `Mount\media`, `hash.manifest` and `azimuth.exe` are no longer changed; deleting `Mount\mediapc` removes every import.

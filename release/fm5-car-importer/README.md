@@ -49,6 +49,14 @@ To undo a layer, run the `Uninstall.ps1` inside its backup folder (right-click >
 
 Imports stack: run the importer again any time to add more cars; the cars you already imported stay.
 
+## Same cars on another PC
+
+1. On the PC with the cars: `Import-Fm5Cars.cmd -ExportList cars.json` writes every imported car with all its choices (donors, sound, group, lights).
+2. Copy `cars.json` to the other PC, next to `Import-Fm5Cars.cmd` there.
+3. On the other PC: `Import-Fm5Cars.cmd -FromList cars.json` imports them with the same choices. It needs its own FM5 and FH2. Cars that PC already has are skipped, so it's safe to run again.
+
+Run these from a command prompt in the importer folder.
+
 ## Known bugs
 
 1. **Dirt mapping needs work**: dirt and grime don't build up on imported cars the way they do on FH2's own.

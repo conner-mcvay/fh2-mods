@@ -43,12 +43,17 @@ param(
   [string]$Name = 'fm5-cars',                # install name (backups are mod-backups\<Name>-<time>)
   [string]$Sqlite = $env:FH2_SQLITE,
   [switch]$ListFm5Only,                      # just list the FM5 cars FH2 doesn't have
+  [string]$ExportList,                       # write the imported cars installed here to this file (for -FromList elsewhere)
+  [string]$FromList,                         # import the cars in a file written by -ExportList (ones already here are skipped)
+  [switch]$Yes,                              # -FromList: don't ask before importing
   [switch]$NoInstall                         # build only (output in build\<Name>)
 )
 $ErrorActionPreference = 'Stop'
 $tools = $PSScriptRoot; $root = Split-Path (Split-Path $tools); $bin = Join-Path (Split-Path $tools) 'bin'   # tools\fm5-import; downloads in tools\bin
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
-$interactive = -not $Car -and -not $ListFm5Only
+if ($FromList -and $Car) { throw 'Pass -Car or -FromList, not both' }
+$interactive = -not $Car -and -not $ListFm5Only -and -not $FromList -and -not $ExportList
+$askFolders = $interactive -or $FromList -or $ExportList   # run by hand: confirm the folders
 
 # --- folders: parameters, then remembered values / Azimuth's own settings, then ask ---
 $settingsPath = Join-Path $env:LOCALAPPDATA 'fh2-mods\import-fm5-cars.json'
@@ -56,8 +61,8 @@ $saved = if (Test-Path $settingsPath) { Get-Content $settingsPath -Raw | Convert
 function Ask([string]$prompt) { $a = Read-Host $prompt; if ($null -eq $a) { throw 'Input ended' }; $a.Trim() }
 function Get-Folder([string]$label, [string]$value, [string]$default, [scriptblock]$valid, [string]$hint) {
   if ($value) { if (& $valid $value) { return (Resolve-Path $value).Path }; throw "$label isn't valid: $value ($hint)" }
-  if (-not $interactive -and $default -and (& $valid $default)) { return $default }
-  if (-not $interactive) { throw "Pass -$($label -replace ' ', '') ($hint)" }
+  if (-not $askFolders -and $default -and (& $valid $default)) { return $default }
+  if (-not $askFolders) { throw "Pass -$($label -replace ' ', '') ($hint)" }
   while ($true) {
     $prompt = if ($default) { "$label [$default]" } else { $label }
     $a = (Ask $prompt).Trim('"')
@@ -70,13 +75,61 @@ $isAzimuth = { param($p) Test-Path (Join-Path $p 'azimuth.exe') }
 $isFh2 = { param($p) Test-Path (Join-Path $p 'Mount\forza_durango_release_final.exe') }
 $isFm5 = { param($p) Test-Path (Join-Path $p 'Mount\media\db\gamedb.slt') }
 
-if ($interactive) { Write-Host "`nFM5 -> FH2 car importer`n" -ForegroundColor Cyan }
+if ($askFolders) { Write-Host "`nFM5 -> FH2 car importer`n" -ForegroundColor Cyan }
 if (-not $NoInstall -or $AzimuthRoot) { $AzimuthRoot = Get-Folder 'Azimuth folder' $AzimuthRoot $saved.AzimuthRoot $isAzimuth 'the folder containing azimuth.exe' }
 $iniGame = $null
 if ($AzimuthRoot -and (Test-Path "$AzimuthRoot\data\azimuth.ini")) {
   $m = [regex]::Match((Get-Content "$AzimuthRoot\data\azimuth.ini" -Raw), '(?m)^game_folder=(.+?)\s*$'); if ($m.Success) { $iniGame = $m.Groups[1].Value }
 }
 $GameRoot = Get-Folder 'FH2 game folder' $GameRoot $(if ($iniGame) { $iniGame } else { $saved.GameRoot }) $isFh2 'the folder containing Mount\forza_durango_release_final.exe'
+
+# --- cars imported by earlier runs that are still installed (each run's backup folder has cars.json) ---
+$layers = @(Get-ChildItem (Join-Path $GameRoot 'mod-backups') -Directory -ErrorAction SilentlyContinue | Sort-Object Name |
+  Where-Object { $_.Name -notlike '*-uninstalled' -and (Test-Path (Join-Path $_.FullName 'cars.json')) -and -not (Test-Path (Join-Path $_.FullName 'uninstalled.txt')) })
+$state = @($layers | ForEach-Object { $l = $_; (Get-Content (Join-Path $l.FullName 'cars.json') -Raw | ConvertFrom-Json) | ForEach-Object { $_ | Add-Member -NotePropertyName layer -NotePropertyValue $l.FullName -PassThru } })
+$importedIds = @($state | ForEach-Object { $_.id }) + -1
+. (Join-Path $tools '..\build\StockSource.ps1')   # Get-GameMediaFile: what the game reads (Mount\mediapc first)
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+# night lights (FM5 cars have none): which FH2 cars have light data, and is their headlight the warm HALOGEN_B
+$lightInfo = @{}
+function Light-Info([string]$fh2Car) {
+  if ($lightInfo.ContainsKey($fh2Car)) { return $lightInfo[$fh2Car] }
+  $zp = Get-GameMediaFile $GameRoot "cars\$fh2Car.zip"; $r = [pscustomobject]@{ Has = $false; Warm = $false }
+  if ($zp) {
+    $z = [IO.Compression.ZipFile]::OpenRead($zp.FullName)
+    try {
+      $r.Has = [bool]($z.Entries | Where-Object FullName -eq 'Lights.bin')
+      $dbg = $z.Entries | Where-Object FullName -eq 'LightPresets.bin_debug'
+      if ($dbg) { $sr = New-Object IO.StreamReader($dbg.Open(), [Text.Encoding]::ASCII); $r.Warm = $sr.ReadToEnd() -match 'PG_Function_Headlight_HALOGEN_B'; $sr.Close() }
+    } finally { $z.Dispose() }
+  }
+  $lightInfo[$fh2Car] = $r; $r
+}
+$whiterFrom = 'PON_TransAmGTA_87'   # HALOGEN_A headlights (1.0, 0.8, 0.6), same preset layout
+function Text-Of($v) { if ($v -is [string] -and $v) { $v } else { $null } }   # cars.json from PowerShell 5.1 can hold {} for an empty value
+
+# --- -ExportList: the installed imports, as they are in the game (lights and headlight colour read from the cars) ---
+if ($ExportList) {
+  $list = @($state | ForEach-Object {
+    $lit = Light-Info $_.car; $ld = Text-Of $_.lightDonor
+    if (-not $lit.Has) { $ld = $null }   # its lights were never fitted (or were undone)
+    [pscustomobject]@{ car = $_.car; donor = (Text-Of $_.donor); soundCar = (Text-Of $_.soundCar); engine = (Text-Of $_.engine)
+      group = (Text-Of $_.group); groupId = $_.groupId; lightDonor = $ld
+      whiter = [bool]($ld -and -not (Text-Of $_.presetFrom) -and -not $lit.Warm -and (Light-Info $ld).Warm)
+      headlightStyle = $(if ($ld) { Text-Of $_.headlightStyle } else { $null }); presetFrom = $(if ($ld) { Text-Of $_.presetFrom } else { $null })
+      headlightColor = $(if ($ld) { Text-Of $_.headlightColor } else { $null }); graphFrom = $(if ($ld) { Text-Of $_.graphFrom } else { $null }) }
+  })
+  if (-not $list.Count) { Write-Host "No imported cars are installed in $GameRoot."; return }
+  # cars imported by hand (Export-Fm5Car / Build-Mod) or lights fitted by running Add-CarLights.ps1 yourself aren't
+  # in any cars.json: add them to the file (same fields) before importing it elsewhere
+  ConvertTo-Json -InputObject $list | Set-Content -LiteralPath $ExportList -Encoding UTF8
+  Write-Host "Wrote $($list.Count) cars to $((Resolve-Path -LiteralPath $ExportList).Path):"
+  $list | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2}, lights {3}" -f $_.car, $_.donor, $_.soundCar, $(if ($_.lightDonor) { $_.lightDonor + $(if ($_.whiter) { ' (whiter)' }) } else { 'none' })) }
+  Write-Host "On the other PC: Import-Fm5Cars.cmd -FromList <this file>"
+  return
+}
+
 $Fm5Root = Get-Folder 'FM5 game folder' $Fm5Root $saved.Fm5Root $isFm5 'the folder containing Mount\media\db\gamedb.slt'
 New-Item -ItemType Directory (Split-Path $settingsPath) -Force | Out-Null
 [pscustomobject]@{ AzimuthRoot = $AzimuthRoot; GameRoot = $GameRoot; Fm5Root = $Fm5Root } | ConvertTo-Json | Set-Content $settingsPath -Encoding UTF8
@@ -99,12 +152,6 @@ if (-not $Sqlite) {
 }
 
 # --- car lists. Every run adds a layer on top of the installed game (earlier imports and other mods stay) ---
-# cars imported by earlier runs that are still installed (each run's backup folder has cars.json)
-$layers = @(Get-ChildItem (Join-Path $GameRoot 'mod-backups') -Directory -ErrorAction SilentlyContinue | Sort-Object Name |
-  Where-Object { $_.Name -notlike '*-uninstalled' -and (Test-Path (Join-Path $_.FullName 'cars.json')) -and -not (Test-Path (Join-Path $_.FullName 'uninstalled.txt')) })
-$state = @($layers | ForEach-Object { $l = $_; (Get-Content (Join-Path $l.FullName 'cars.json') -Raw | ConvertFrom-Json) | ForEach-Object { $_ | Add-Member -NotePropertyName layer -NotePropertyValue $l.FullName -PassThru } })
-$importedIds = @($state | ForEach-Object { $_.id }) + -1
-. (Join-Path $tools '..\build\StockSource.ps1')   # Get-GameMediaFile: what the game reads (Mount\mediapc first)
 $fhDb = (Get-GameMediaFile $GameRoot 'stripped\gamedbRC.slt').FullName.Replace('\', '/'); $fmDb = (Join-Path $fm5Media 'db\gamedb.slt').Replace('\', '/')
 function Q([string]$sql) {   # rows as arrays of fields; no double quotes in $sql (PowerShell 5.1 native argument quirk)
   $out = & $Sqlite -bail -list -separator '|' ':memory:' "ATTACH 'file:$fmDb`?immutable=1' AS fm;" "ATTACH 'file:$fhDb`?immutable=1' AS fh;" $sql
@@ -174,24 +221,6 @@ function Pick([object[]]$rows, [string]$prompt, [object]$default, [switch]$Allow
   }
 }
 
-# night lights (FM5 cars have none): which FH2 cars have light data, and is their headlight the warm HALOGEN_B
-$lightInfo = @{}
-function Light-Info([string]$fh2Car) {
-  if ($lightInfo.ContainsKey($fh2Car)) { return $lightInfo[$fh2Car] }
-  $zp = Get-GameMediaFile $GameRoot "cars\$fh2Car.zip"; $r = [pscustomobject]@{ Has = $false; Warm = $false }
-  if ($zp) {
-    $z = [IO.Compression.ZipFile]::OpenRead($zp.FullName)
-    try {
-      $r.Has = [bool]($z.Entries | Where-Object FullName -eq 'Lights.bin')
-      $dbg = $z.Entries | Where-Object FullName -eq 'LightPresets.bin_debug'
-      if ($dbg) { $sr = New-Object IO.StreamReader($dbg.Open(), [Text.Encoding]::ASCII); $r.Warm = $sr.ReadToEnd() -match 'PG_Function_Headlight_HALOGEN_B'; $sr.Close() }
-    } finally { $z.Dispose() }
-  }
-  $lightInfo[$fh2Car] = $r; $r
-}
-Add-Type -AssemblyName System.IO.Compression.FileSystem
-$whiterFrom = 'PON_TransAmGTA_87'   # HALOGEN_A headlights (1.0, 0.8, 0.6), same preset layout
-
 # --- interactive selection ---
 $plan = @()   # @{ id; car; donor; soundCar; engine }
 if ($interactive) {
@@ -222,11 +251,25 @@ if ($interactive) {
     $plan += @{ id = $c[0]; car = $c[1]; donor = $d[1]; soundCar = $s[1]; engine = (Engine-Of $s[1]); group = $g.Id; groupName = $g.Name
                 lightDonor = $(if ($l -ne 'none') { $l[1] }); whiter = $white }
   }
-  if (-not $plan.Count) { Write-Host 'Nothing to import.'; return }
-  Write-Host "`nImport plan:" -ForegroundColor Cyan
-  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3}), group {4}, lights {5}" -f $_.car, $_.donor, $_.soundCar, $_.engine, $_.groupName,
-    $(if ($_.lightDonor) { $_.lightDonor + $(if ($_.whiter) { ' (whiter headlights)' }) } else { 'none' })) }
-  if ((Ask "`nProceed? [Y/n]") -match '^(n|no)$') { Write-Host 'Cancelled.'; return }
+} elseif ($FromList) {
+  # a list from -ExportList (another PC's imports): the same choices, minus the cars this game already has
+  $list = @((Get-Content -LiteralPath $FromList -Raw | ConvertFrom-Json) | ForEach-Object { $_ })   # (5.1: unroll the array)
+  $haveFh2 = @((Q 'SELECT MediaName FROM fh.Data_Car') | ForEach-Object { $_[0].ToLowerInvariant() })
+  foreach ($e in $list) {
+    $row = @($fm5Only | Where-Object { $_[1] -ieq $e.car })
+    if (-not $row) {
+      if ($haveFh2 -contains "$($e.car)".ToLowerInvariant()) { Write-Host "  $($e.car): already in the game, skipped"; continue }
+      throw "FM5 car $($e.car) isn't in this FM5 (Mount\media\db\gamedb.slt)"
+    }
+    $g = if ($e.groupId) { Find-Group "$($e.groupId)" } elseif (Text-Of $e.group) { Find-Group $e.group } else { $null }
+    $ld = Text-Of $e.lightDonor
+    if ($ld -and -not (Light-Info $ld).Has) { throw "Light donor $ld (for $($e.car)) has no light data here" }
+    $snd = Text-Of $e.soundCar
+    $plan += @{ id = $row[0][0]; car = $row[0][1]; donor = (Text-Of $e.donor); soundCar = $snd
+                engine = $(if (Text-Of $e.engine) { $e.engine } elseif ($snd) { Engine-Of $snd } else { $null })
+                group = $(if ($g) { $g.Id }); groupName = $(if ($g) { $g.Name }); lightDonor = $ld; whiter = [bool]$e.whiter
+                headlightStyle = (Text-Of $e.headlightStyle); presetFrom = (Text-Of $e.presetFrom); headlightColor = (Text-Of $e.headlightColor); graphFrom = (Text-Of $e.graphFrom) }
+  }
 } else {
   if ($Donor -and $Donor.Count -ne $Car.Count) { throw '-Donor needs one entry per -Car' }
   if ($SoundCar -and $SoundCar.Count -ne $Car.Count) { throw '-SoundCar needs one entry per -Car (use "" for the data donor''s)' }
@@ -243,6 +286,13 @@ if ($interactive) {
                 group = $(if ($g) { $g.Id }); groupName = $(if ($g) { $g.Name })
                 lightDonor = $(if ($LightDonor -and $LightDonor[$i]) { $LightDonor[$i] }); whiter = [bool]$WhiterHeadlights }
   }
+}
+if ($interactive -or $FromList) {
+  if (-not $plan.Count) { Write-Host 'Nothing to import.'; return }
+  Write-Host "`nImport plan:" -ForegroundColor Cyan
+  $plan | ForEach-Object { Write-Host ("  {0,-26} data donor {1,-24} sound {2} ({3}), group {4}, lights {5}" -f $_.car, $_.donor, $_.soundCar, $_.engine, $_.groupName,
+    $(if ($_.lightDonor) { $_.lightDonor + $(if ($_.whiter) { ' (whiter headlights)' }) } else { 'none' })) }
+  if (-not $Yes -and (Ask "`nProceed? [Y/n]") -match '^(n|no)$') { Write-Host 'Cancelled.'; return }
 }
 if (-not $AzimuthRoot -and -not $NoInstall) { throw 'Pass -AzimuthRoot <folder containing azimuth.exe>' }
 
@@ -277,14 +327,17 @@ $installed = @(& (Join-Path $release 'Install.ps1') -GameRoot $GameRoot -Azimuth
 $installed | ForEach-Object { Write-Host "$_" }
 $backup = ($installed | Where-Object { "$_" -like 'Backup: *' } | Select-Object -First 1) -replace '^Backup: '
 # remember what this layer imported (for later runs and for undoing it)
-ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine; group = $_.groupName; lightDonor = $_.lightDonor } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
+ConvertTo-Json -InputObject @($plan | ForEach-Object { [pscustomobject]@{ id = $_.id; car = $_.car; donor = $_.donor; soundCar = $_.soundCar; engine = $_.engine; group = $_.groupName; groupId = $_.group; lightDonor = $_.lightDonor; whiter = [bool]$_.whiter
+  headlightStyle = $_.headlightStyle; presetFrom = $_.presetFrom; headlightColor = $_.headlightColor; graphFrom = $_.graphFrom } }) | Set-Content (Join-Path $backup 'cars.json') -Encoding UTF8
 
 # night lights: fitted to the installed (converted) car models, so they go on as their own layer after the cars
 $lit = @($plan | Where-Object { $_.lightDonor })
 if ($lit.Count) {
   Write-Host "`nFitting night lights..."
   $la = @{ Car = @($lit | ForEach-Object car); Donor = @($lit | ForEach-Object lightDonor); GameRoot = $GameRoot; AzimuthRoot = $AzimuthRoot; Sqlite = $Sqlite; Name = "$Name-lights"
-           PresetFrom = @($lit | ForEach-Object { if ($_.whiter -and (Light-Info $_.lightDonor).Warm) { $whiterFrom } else { '' } }) }
+           PresetFrom = @($lit | ForEach-Object { if ($_.presetFrom) { $_.presetFrom } elseif ($_.whiter -and (Light-Info $_.lightDonor).Warm) { $whiterFrom } else { '' } })
+           HeadlightStyle = @($lit | ForEach-Object { "$($_.headlightStyle)" }); HeadlightColor = @($lit | ForEach-Object { "$($_.headlightColor)" })
+           GraphFrom = @($lit | ForEach-Object { "$($_.graphFrom)" }) }
   & (Join-Path $tools 'Add-CarLights.ps1') @la 6>&1 3>&1 | Where-Object { "$_" -match '(<- lights of|lights placed|^Installed|^Backup|preset PG_Function_Headlight)' -or $_ -is [System.Management.Automation.WarningRecord] } | ForEach-Object { Write-Host "$_" }
 }
 Write-Host "`nDone. Start the game through azimuth.exe; the cars are in the Autoshow."

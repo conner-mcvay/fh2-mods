@@ -195,8 +195,10 @@ try {
 # FM5 car models: add the vertex inputs FH2's shaders read (tangents, extra UV sets); without them glass,
 # light lenses, decals and badges aren't drawn
 if ($fm5CarZips.Count) {
-  if (-not ('Fm5ModelConverter' -as [type])) {
-    Add-Type -Path (Join-Path $PSScriptRoot '..\fm5-import\ForzaModel.cs'), (Join-Path $PSScriptRoot '..\fm5-import\Fm5ModelConverter.cs') -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
+  # the model code is shared with Add-CarLights, which may run in the same session: both load all three
+  if (-not ('BurgBlob' -as [type])) {
+    $cs = 'ForzaModel.cs', 'Fm5ModelConverter.cs', 'CarLights.cs' | ForEach-Object { Join-Path $PSScriptRoot "..\fm5-import\$_" }
+    Add-Type -Path $cs -ReferencedAssemblies System.Core, System.IO.Compression, System.IO.Compression.FileSystem
   }
   foreach ($rel in $fm5CarZips) {
     $src = $zips[$rel]; $carName = [IO.Path]::GetFileNameWithoutExtension($rel)
