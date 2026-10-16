@@ -125,8 +125,12 @@ Object messages (all in `nerd.py`): ObjectCreate/Update are router id (4 bits), 
 
 1. Test with two consoles. The other messages consoles send (35, 71, ...) aren't relayed yet.
 3. Weather (above), so consoles share it instead of skipping the wait.
-4. Answer the remaining LSP calls with real data. Known bug: single player's drivatars and progression are broken while fh2net is installed (cause not found yet; the unanswered `Drivatar.*` and `OnlineProfile.*` calls are suspects).
+4. Answer the remaining LSP calls with real data. Single player was broken by default answers (fixed in fh2srv):
+   - `GetEconomySettings` answered zeros, and the game keeps them in the save (SaveState `ForzaEconomyState`), so events paid no XP/CR even offline. fh2srv now answers the game's built-in values (what a save that never got server values writes); `release/fh2net/Repair-Fh2Save.ps1` removes the zeroed object from saves (a new revision with the commit file's SaveState hash updated).
+   - Drivatars come from the game's own `media\drivatarglobalcache\DefaultCache.bin` (125 records of 9816 bytes, the format the game writes its download cache in): GamerTag at 0, Xuid 0x28, Car/Livery/Tune 0x30/0x38/0x40, UserInfo (29 floats, the driving style; pace `timeRatioMean` and `temperamentMean` differ per drivatar) at 0x25D4, UserSkillLevel 0x2648, wristbandLevel 0x264C. An empty answer gave nameless DriverXXX drivatars, an error none, a non-zero Xuid "Driver NNNN", zero UserInfo identical drivers in packs. 0x2650 (1..25 in the game's file) isn't in the message; the game leaves it 0 for downloaded ones.
+
+fh2net checks the server first (`[http] OfflineIfUnreachable=1`, `CheckTimeout=2000`: a TCP connect to `Server` from DllMain's thread, which the worker waits for). Without an answer it installs nothing (only the Xuid patch and input script, applied in DllMain, stay), so the game runs as Azimuth alone: offline, no load hang.
 
 ## Release
 
-`tools\release\Make-NetRelease.ps1 -Version <x.y.z>` builds `dist\fh2net-<x.y.z>.zip`: fh2net.dll, the server, `Install-Fh2net.ps1`, an ini template and the player README (`release/fh2net`).
+`tools\release\Make-NetRelease.ps1 -Version <x.y.z>` builds `dist\fh2net-<x.y.z>.zip`: fh2net.dll, the server, `Install-Fh2net.ps1`, `Repair-Fh2Save.ps1`, an ini template and the player README (`release/fh2net`).

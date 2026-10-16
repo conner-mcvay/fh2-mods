@@ -519,8 +519,52 @@ static void install_token_hooks(void) {
   logf("token hooks installed (token \"%ls\")", g_token);
 }
 
+// ---- server check ------------------------------------------------------------------------------
+// With [http] Server set, fh2net first checks that the server takes a TCP connection ([http] CheckTimeout ms
+// per address, default 2000). When it doesn't, fh2net hooks and patches nothing, so the game starts offline as
+// with Azimuth alone instead of hanging at load on a server that isn't there. [http] OfflineIfUnreachable=0
+// turns the check off. The game doesn't wait for it; the hooks go in once it answers.
+static int g_offlineIfUnreachable, g_checkTimeout;
+static HANDLE g_checkThread;
+static volatile LONG g_serverUp;
+
+static DWORD WINAPI server_check(LPVOID p) {
+  (void)p;
+  wchar_t host[128]; URL_COMPONENTS uc = { sizeof uc };
+  uc.lpszHostName = host; uc.dwHostNameLength = 128;
+  if (!WinHttpCrackUrl(g_httpServer, 0, 0, &uc)) { g_serverUp = 1; return 0; }   // xhr_init reports the bad URL
+  WSADATA wd; WSAStartup(MAKEWORD(2, 2), &wd);
+  wchar_t port[8]; _snwprintf(port, 8, L"%u", uc.nPort);
+  ADDRINFOW hints = { 0 }, *ai = NULL;
+  hints.ai_socktype = SOCK_STREAM; hints.ai_protocol = IPPROTO_TCP;
+  LARGE_INTEGER t0, t1; QueryPerformanceCounter(&t0);
+  int up = 0, rc = GetAddrInfoW(host, port, &hints, &ai);
+  for (ADDRINFOW *a = rc ? NULL : ai; a && !up; a = a->ai_next) {
+    SOCKET s = socket(a->ai_family, SOCK_STREAM, IPPROTO_TCP);
+    if (s == INVALID_SOCKET) continue;
+    u_long nb = 1; ioctlsocket(s, FIONBIO, &nb);
+    if (connect(s, a->ai_addr, (int)a->ai_addrlen) == 0) up = 1;
+    else if (WSAGetLastError() == WSAEWOULDBLOCK) {
+      fd_set w, e; FD_ZERO(&w); FD_ZERO(&e); FD_SET(s, &w); FD_SET(s, &e);
+      struct timeval tv = { g_checkTimeout / 1000, (g_checkTimeout % 1000) * 1000 };
+      if (select(0, NULL, &w, &e, &tv) == 1 && FD_ISSET(s, &w)) up = 1;
+    }
+    closesocket(s);
+  }
+  if (ai) FreeAddrInfoW(ai);
+  QueryPerformanceCounter(&t1);
+  logf("server check %ls port %u: %s (%.0f ms)", host, uc.nPort, up ? "answers" : rc ? "name not found" : "no answer",
+       (double)(t1.QuadPart - t0.QuadPart) * 1000 / g_freq.QuadPart);
+  g_serverUp = up;
+  return 0;
+}
+
 static DWORD WINAPI worker(LPVOID p) {
   (void)p;
+  if (g_checkThread && (WaitForSingleObject(g_checkThread, g_checkTimeout * 4 + 5000) != WAIT_OBJECT_0 || !g_serverUp)) {
+    logf("the server at %ls isn't reachable: fh2net changes nothing, the game starts offline", g_httpServer);
+    return 0;
+  }
   logf("waiting for the game image at %p", GAME_BASE);
   int i;
   for (i = 0; i < 600000; i++) {   // up to ~10 minutes at 1 ms
@@ -583,7 +627,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   GetPrivateProfileStringW(L"net", L"ServerAddress", L"::1", g_serverIp6, 64, g_ini);
   g_serverPort = GetPrivateProfileIntW(L"net", L"ServerPort", 5101, g_ini);
   GetPrivateProfileStringW(L"net", L"LocalAddress", L"", g_localAddress, 256, g_ini);
+  g_offlineIfUnreachable = GetPrivateProfileIntW(L"http", L"OfflineIfUnreachable", 1, g_ini);
+  g_checkTimeout = GetPrivateProfileIntW(L"http", L"CheckTimeout", 2000, g_ini);
   logf("settings: ConnectivityLevel=%d FakeToken=%d FakeQos=%d FixStreams=%d Server=%ls", g_netLevel, g_fakeToken, g_fakeQos, g_fixStreams, g_httpServer);
+  if (g_httpServer[0] && g_offlineIfUnreachable) g_checkThread = CreateThread(NULL, 0, server_check, NULL, 0, NULL);
   // The forwarded exports resolve against this module once it is loaded under its own name.
   HMODULE nx = LoadLibraryW(next);
   logf("azimuth-tls-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());

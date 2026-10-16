@@ -164,13 +164,21 @@ def load_drivatar_cache():
     if ver != 4 or 8 + 9816 * n != len(d):
         print(f'unexpected {p} (version {ver}, {n} records, {len(d)} bytes); drivatars get no names', flush=True)
         return []
+    # UserInfo (the drivatar's driving style: its pace, timeRatioMean, and temperament differ per drivatar) is its
+    # fields' floats in order, base first, ending at UserSkillLevel. Sent as zeros, every drivatar drove the same.
+    ui = next(f for f in schema.find('DrivatarRacingInfo')['fields'] if f['name'] == 'UserInfo')
+    base = [f['name'] for f in ui['fields'][0]['fields']]
+    rest = [f['name'] for f in ui['fields'][1:]]
+    ui_at = 0x2648 - 4 * (len(base) + len(rest))
     out = []
     for i in range(n):
         r = d[8 + 9816 * i:8 + 9816 * (i + 1)]
+        fl = struct.unpack_from(f'<{len(base) + len(rest)}f', r, ui_at)
+        user_info = dict(zip(rest, fl[len(base):]), base=dict(zip(base, fl)))
         out.append({'GamerTag': r[:32].decode('utf-16le').split('\0')[0], 'IsFriend': False,
                     'Xuid': struct.unpack_from('<Q', r, 0x28)[0], 'CarId': struct.unpack_from('<I', r, 0x30)[0],
                     'LiveryId': struct.unpack_from('<Q', r, 0x38)[0], 'TuneId': struct.unpack_from('<Q', r, 0x40)[0],
-                    'UserSkillLevel': struct.unpack_from('<I', r, 0x2648)[0],
+                    'UserInfo': user_info, 'UserSkillLevel': struct.unpack_from('<I', r, 0x2648)[0],
                     'wristbandLevel': struct.unpack_from('<i', r, 0x264C)[0]})
     return out
 

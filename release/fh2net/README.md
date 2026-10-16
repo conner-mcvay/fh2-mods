@@ -4,7 +4,9 @@ Experimental. fh2net lets FH2 on Azimuth join **online free roam** with other pl
 
 **No Turn 10 or Microsoft code is used.** fh2net and the server are written from scratch, and the package contains no game files. The server reads the game's message formats at runtime from your own copy of FH2.
 
-> **Warning: while fh2net is installed, drivatars and progression are broken in single player.** This is a known bug, to be fixed later. For a normal single-player session, uninstall fh2net first (`Install-Fh2net.ps1 -Uninstall`; it keeps your settings) and install it again when you want to play online.
+Single player keeps working with fh2net installed: with the server running, events pay XP and CR and drivatars race as usual. Without it, the game starts offline.
+
+> **Used fh2net 0.1.0 or 0.1.1?** Their server zeroed your save's XP and CR payouts (even offline). Close the game and run `Repair-Fh2Save.ps1` once (right-click > *Run with PowerShell*). It adds a fixed save revision and keeps the old ones.
 
 ## What you need
 
@@ -56,13 +58,13 @@ Over the internet, forward TCP 8090 and UDP 5101 on the server's router to the s
 
 ### 3. Playing
 
-1. Start the server, then the game through Azimuth. The game signs in to your server while it loads (the server's window shows the requests).
+1. Start the server, then the game through Azimuth. The game signs in to your server while it loads (the server's window shows the requests). If fh2net can't reach the server when the game starts, it stays out of the way and the game starts offline, as with Azimuth alone (`fh2net.log` says so). Restart the game once the server is up to play online.
 2. In free roam, open the pause menu and start **online free roam**. When it says "freeroam session found", press **Select** (View) to join.
 3. Other players do the same and join the same session. Players appear in the session list and each other's world.
 
 ## Known problems
 
-- **Single player: drivatars and progression are broken while fh2net is installed** (see the warning above). Uninstall it for single player.
+- If the server stops while you play, the game may hang on its next request to the server. Restart the game.
 - No AI traffic online, and the weather isn't shared (each player keeps their own).
 - Races, Road Trips, car meets and other online events aren't supported yet; only free roam driving.
 - Liveries: other players see your design only after you **save it in the paint shop while online** (that uploads it to the server). Designs saved offline aren't sent.
@@ -75,6 +77,7 @@ README.md, LICENSE
 fh2net.dll            the Azimuth DLL
 fh2net.ini            settings template (installed into data\bin the first time)
 Install-Fh2net.ps1    install / -Uninstall
+Repair-Fh2Save.ps1    restores XP and CR payouts in saves zeroed by 0.1.0/0.1.1's server
 server\               fh2srv.py (run this), relay.py, nerd.py, xls.py
 extras\               controller scripts for testing ([input] Script=): idle (fakes a connected controller), drive (joins and drives in circles)
 ```
