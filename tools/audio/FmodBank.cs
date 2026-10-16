@@ -252,6 +252,160 @@ public class FmodBank {
     return layers;
   }
 
+  // --- tuning ----------------------------------------------------------------------------------------------------
+  // Every setting adds to the stock value of what it targets (0 = stock):
+  //   Turbo, DSC, CSC        the nested events on the upgrade-level sheets (master volume, dB)
+  //   BOV, Backfire          tracks playing only those samples (volume, dB; tracks whose volume is automated are left:
+//                          every car's Burble track is, so the off-throttle burble has no setting)
+  //   <Sound>Volume          every layer of that sound on its EngineRPM sheet (instrument volume, dB)
+  //   <Sound>Idle            its lowest-RPM layer (the RPM in the sample name: Exhaust_00720), on top of Volume
+  //   <Sound>Highs / Lows    the high / low band of its 3-band EQs (dB; Highs: the EQs on the tracks the layers play
+  //                          into, Lows: the EQ on the group above them; either falls back to the other level)
+  //   <Sound>Grit            the drive of its Turn10Saturator (on the group, else the tracks)
+  //   LowFreq                the low-frequency layers (samples named LFE) on EngineRPM sheets (dB)
+  // <Sound> is Exhaust, Engine or Intake. Effects: BEFX > BEFF (BEFB: GUID, FMOD effect type at byte 20; 28 = 3-band
+  // EQ) and PEFX > PEFF (PEFB: GUID, name length at 20, name: Turn10Saturator), each with PMEF = count, then per
+  // setting u32 type (0 float, 1 int) + value; a bus uses the effects whose GUIDs its record holds. 3-EQ settings:
+  // low gain, mid gain, high gain (dB, -80 to 10), low and high crossover (Hz), slope; the saturator's first is the drive.
+  public static readonly string[] SoundsTuned = { "Exhaust", "Engine", "Intake" };
+  public static readonly string[] Settings = {
+    "ExhaustVolume", "ExhaustIdle", "ExhaustHighs", "ExhaustLows", "ExhaustGrit",
+    "EngineVolume", "EngineIdle", "EngineHighs", "EngineLows", "EngineGrit",
+    "IntakeVolume", "IntakeIdle", "IntakeHighs", "IntakeLows", "IntakeGrit",
+    "LowFreq", "Backfire", "Turbo", "DSC", "CSC", "BOV" };
+
+  public class Target { public string Setting; public int Offset; public float Stock, Min, Max; public string What; }
+  List<Target> targets;
+  public List<Target> Targets() { if (targets == null) targets = FindTargets(); return targets; }
+  public IEnumerable<string> Available() { return Settings.Where(s => Targets().Any(t => t.Setting == s)); }
+
+  // Writes the settings (dB etc. added to stock) into Data, which must be the stock bank; returns how many values changed.
+  public int Tune(IDictionary<string, float> settings) {
+    var sum = new Dictionary<int, float>(); var lim = new Dictionary<int, Target>();
+    foreach (var t in Targets()) {
+      float v; if (!settings.TryGetValue(t.Setting, out v) || v == 0) continue;
+      float cur; sum[t.Offset] = (sum.TryGetValue(t.Offset, out cur) ? cur : 0) + v; lim[t.Offset] = t;
+    }
+    foreach (var kv in sum) {
+      var t = lim[kv.Key]; float nv = Math.Max(t.Min, Math.Min(t.Max, t.Stock + kv.Value));
+      Array.Copy(BitConverter.GetBytes(nv), 0, Data, kv.Key, 4);
+    }
+    return sum.Count;
+  }
+
+  List<Target> FindTargets() {
+    var list = new List<Target>();
+    foreach (var s in Sounds)   // Turbo / DSC / CSC / BOV, found by Find()
+      list.Add(new Target { Setting = s.Kind, Offset = s.VolumeOffset, Stock = s.StockVolume, Min = -80, Max = 30, What = s.Kind + " " + s.Range });
+
+    var lfe = new Regex("(^|_)LFE(_|$)", RegexOptions.IgnoreCase);
+    var rpm = new Regex(@"(\d{3,5})(?!.*\d{3})");
+    var layers = Layers().Where(l => l.Sheet == "EngineRPM" && (l.Type == "WAIT" || l.Type == "MUIT") && !l.VolumeAutomated && l.Volume > -40).ToList();
+    var seen = new HashSet<int>();
+    foreach (var l in layers) {
+      if (!seen.Add(l.VolumeOffset)) continue;
+      string sound = lfe.IsMatch(l.Category) ? "LowFreq" : SoundsTuned.FirstOrDefault(s => l.Category.StartsWith(s, StringComparison.OrdinalIgnoreCase));
+      if (sound == null) continue;
+      list.Add(new Target { Setting = sound == "LowFreq" ? "LowFreq" : sound + "Volume", Offset = l.VolumeOffset, Stock = l.Volume, Min = -80, Max = 40, What = string.Join(", ", l.Samples) });
+    }
+    foreach (var s in SoundsTuned) {   // idle: the layer recorded at the lowest RPM
+      var mine = layers.Where(l => !lfe.IsMatch(l.Category) && l.Category.StartsWith(s, StringComparison.OrdinalIgnoreCase) && l.Samples.Length > 0).ToList();
+      Func<FmodLayer, int> at = l => { var m = rpm.Match(l.Samples[0]); return m.Success ? int.Parse(m.Groups[1].Value) : 100000 + (int)l.Start; };
+      var idle = mine.OrderBy(at).ThenBy(l => l.Start).FirstOrDefault();
+      if (idle != null) list.Add(new Target { Setting = s + "Idle", Offset = idle.VolumeOffset, Stock = idle.Volume, Min = -80, Max = 40, What = idle.Samples[0] });
+    }
+    FindTrackTargets(list);
+    FindEffectTargets(list);
+    return list;
+  }
+
+  // the bank's structure for the track and effect targets: instruments, their samples and tracks, the bus tree
+  Dictionary<string, Chunk> instrs, buses; Dictionary<string, string> busParent; Dictionary<string, HashSet<string>> onTrack;
+  void MapBuses() {
+    if (onTrack != null) return;
+    var sampleName = SampleNames(); var wav = new Dictionary<string, string>();
+    foreach (var w in Section("WAVS")) { int idx = BitConverter.ToInt32(Data, w.Offset + 8 + 22); if (idx >= 0 && idx < sampleName.Length) wav[RecordGuid(w)] = sampleName[idx]; }
+    instrs = new Dictionary<string, Chunk>();
+    foreach (var s in new[] { "WAIS", "MUIS", "SPIS", "PRIS", "EVIS" }) foreach (var c in Section(s)) instrs[RecordGuid(c)] = c;
+    buses = new Dictionary<string, Chunk>(); busParent = new Dictionary<string, string>();
+    foreach (var c in Section("GBSS")) { var g = RecordGuid(c); buses[g] = c; var h = Kids(c)[0]; if (h.Size >= 34) busParent[g] = Guid16(h.Offset + 8 + 18); }
+    var memo = new Dictionary<string, HashSet<string>>();
+    Func<string, int, HashSet<string>> samples = null;
+    samples = (g, depth) => {
+      HashSet<string> s; if (memo.TryGetValue(g, out s)) return s;
+      s = new HashSet<string>(); memo[g] = s;
+      foreach (var w in GuidsIn(instrs[g], wav.Keys)) s.Add(wav[w]);
+      if (depth < 4) foreach (var child in GuidsIn(instrs[g], instrs.Keys)) if (child != g && ListType(instrs[child]) != "EVIT") s.UnionWith(samples(child, depth + 1));
+      return s;
+    };
+    onTrack = new Dictionary<string, HashSet<string>>();
+    foreach (var kv in instrs) {
+      var ic = Kids(kv.Value).FirstOrDefault(k => k.Id == "INST");
+      if (ic.Id != "INST" || ic.Size < 99 || Data[ic.Offset + 8 + 81] != 0x18 || Data[ic.Offset + 8 + 82] != 0) continue;
+      string t = Guid16(ic.Offset + 8 + 83); if (!buses.ContainsKey(t)) continue;
+      HashSet<string> set; if (!onTrack.TryGetValue(t, out set)) onTrack[t] = set = new HashSet<string>();
+      set.UnionWith(samples(kv.Key, 0));
+    }
+  }
+  bool VolumeAutomated(Chunk record) {
+    var prps = Kids(record).FirstOrDefault(k => k.Id == "LIST" && ListType(k) == "PRPS");
+    if (prps.Id != "LIST") return false;
+    foreach (var p in Kids(prps).Where(k => k.Id == "PROP" && k.Size >= 24))
+      if (BitConverter.ToInt32(Data, p.Offset + 8) == 0) for (int j = 8; j < 24; j++) if (Data[p.Offset + 8 + j] != 0) return true;
+    return false;
+  }
+
+  void FindTrackTargets(List<Target> list) {   // Backfire: tracks of its own (BOV is in Sounds)
+    MapBuses();
+    var kinds = new Dictionary<string, Regex> { { "Backfire", new Regex("^back_?fire", RegexOptions.IgnoreCase) } };
+    foreach (var kv in onTrack) {
+      foreach (var k in kinds) {
+        if (kv.Value.Count == 0 || !kv.Value.All(n => k.Value.IsMatch(n))) continue;
+        var bus = Kids(buses[kv.Key]).FirstOrDefault(c => c.Id == "BUS ");
+        if (bus.Id != "BUS " || bus.Size != 19 || VolumeAutomated(buses[kv.Key])) continue;
+        int at = bus.Offset + 8 + 11;
+        list.Add(new Target { Setting = k.Key, Offset = at, Stock = BitConverter.ToSingle(Data, at), Min = -80, Max = 30, What = k.Key + " track" });
+      }
+    }
+  }
+
+  void FindEffectTargets(List<Target> list) {
+    MapBuses();
+    var eq = new Dictionary<string, int>(); var sat = new Dictionary<string, int>();   // effect GUID -> its PMEF settings' offset
+    foreach (var e in Section("BEFX").Concat(Section("PEFX"))) {
+      if (e.Id != "LIST") continue;
+      var ks = Kids(e); var h = ks[0]; var pm = ks.FirstOrDefault(k => k.Id == "PMEF");
+      if (pm.Id != "PMEF" || h.Size < 22) continue;
+      int n = BitConverter.ToInt32(Data, pm.Offset + 8);
+      if (4 + 8 * n != pm.Size) continue;
+      bool floats = Enumerable.Range(0, n).All(i => BitConverter.ToInt32(Data, pm.Offset + 12 + 8 * i) <= 1);
+      if (!floats) continue;
+      if (h.Id == "BEFB" && h.Size >= 24 && BitConverter.ToInt32(Data, h.Offset + 8 + 20) == 28 && n >= 3) eq[Guid16(h.Offset + 8)] = pm.Offset + 12;
+      else if (h.Id == "PEFB") {
+        int len = BitConverter.ToUInt16(Data, h.Offset + 8 + 20);
+        if (22 + len <= h.Size && Encoding.ASCII.GetString(Data, h.Offset + 8 + 22, len).TrimEnd('\0') == "Turn10Saturator" && n >= 1) sat[Guid16(h.Offset + 8)] = pm.Offset + 12;
+      }
+    }
+    Func<string, HashSet<string>> direct = g => { HashSet<string> s; return onTrack.TryGetValue(g, out s) ? s : new HashSet<string>(); };
+    var lfe = new Regex("(^|_)LFE(_|$)", RegexOptions.IgnoreCase);
+    Func<string, string, bool> carries = null;   // does the bus (or a bus below it) play this sound?
+    carries = (g, sound) => direct(g).Any(n => n.StartsWith(sound, StringComparison.OrdinalIgnoreCase) && !lfe.IsMatch(n))
+      || busParent.Where(p => p.Value == g).Any(p => carries(p.Key, sound));
+    foreach (var sound in SoundsTuned) {
+      var tracks = buses.Keys.Where(g => direct(g).Any(n => n.StartsWith(sound, StringComparison.OrdinalIgnoreCase) && !lfe.IsMatch(n))).ToList();
+      var groups = buses.Keys.Where(g => !tracks.Contains(g) && carries(g, sound)).ToList();
+      Func<List<string>, Dictionary<string, int>, List<int>> fx = (bs, kind) => bs.SelectMany(g => GuidsIn(buses[g], kind.Keys).Select(e => kind[e])).Distinct().ToList();
+      var trackEq = fx(tracks, eq); var groupEq = fx(groups, eq);
+      foreach (var o in (trackEq.Count > 0 ? trackEq : groupEq)) list.Add(EffectTarget(sound + "Highs", o + 2 * 8 + 4, -80, 10, "EQ high band"));
+      foreach (var o in (groupEq.Count > 0 ? groupEq : trackEq)) list.Add(EffectTarget(sound + "Lows", o + 4, -80, 10, "EQ low band"));
+      var groupSat = fx(groups, sat); var trackSat = fx(tracks, sat);
+      foreach (var o in (groupSat.Count > 0 ? groupSat : trackSat)) list.Add(EffectTarget(sound + "Grit", o + 4, 0, 40, "saturator drive"));
+    }
+  }
+  Target EffectTarget(string setting, int at, float min, float max, string what) {
+    return new Target { Setting = setting, Offset = at, Stock = BitConverter.ToSingle(Data, at), Min = min, Max = max, What = what };
+  }
+
   int IndexOf(byte[] s) {
     for (int i = 0; i + s.Length <= Data.Length; i++) { int j = 0; while (j < s.Length && Data[i + j] == s[j]) j++; if (j == s.Length) return i; }
     return -1;

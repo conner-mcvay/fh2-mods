@@ -14,6 +14,7 @@ The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired:
 |---|---|
 | [FM5 car importer](#importing-fm5-cars) | Brings Forza Motorsport 5 cars into FH2 from your own FM5 install (double-click `Import-Fm5Cars.cmd`). Release package: `tools\release\Make-ImporterRelease.ps1 -Version <x.y.z>`; user docs in `release/fm5-car-importer` |
 | [fh2net](tools/online) | Experimental online free roam over a LAN or the internet through a server you run. Release package: `tools\release\Make-NetRelease.ps1 -Version <x.y.z>`; user docs in `release/fh2net` |
+| [Car sound tuner](#car-sound-tuner) | Sliders for any car's sound: exhaust, engine and intake volume, idle, highs, lows and grit, the sub-bass layer, backfires, turbo, superchargers, blow-off valve (double-click `Tune-CarSound.cmd`) |
 | [Turbo / supercharger volume](#turbo-and-supercharger-volume) | Makes any car's turbo, positive-displacement (DSC) or centrifugal (CSC) supercharger sound louder or quieter (double-click `Set-BoostVolume.cmd`) |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
 
@@ -52,6 +53,8 @@ tools/
     Set-BoostVolume.ps1                   turbo / supercharger volume per car (Set-BoostVolume.cmd runs it)
     FmodBank.cs                           finds those sounds in a car's FMOD bank and sets their volume; lists a bank's layers
     Show-CarSound.ps1                     lists what a car's sound is made of (events, sheets, RPM layers, samples, volumes)
+    Tune-CarSound.ps1                     the slider window (Tune-CarSound.cmd runs it)
+    CarSound.ps1                          shared by the two: folders, car list, writing a tuned bank and car-sound.json
   weather-menu/
     FH2WeatherMenu.cs, build.ps1          the time and weather menu and its build script
     FH2-Time-Weather-Menu-Guide.docx      its user guide
@@ -135,6 +138,17 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 - gives FM5 window glass (`gls_window`, `gls_windsheild`, interior variants) FH2's material parameter override (`0xF2FDFE8E` = 0); without it panes aren't drawn
 - redirects car-local materials whose shader is FM5-compiled inside the car (missing FH2's `SimpleCarLightScenario`) to the FH2 library material of the same name minus the `CH1` tag (`gls_limotintCH1_001` -> `gls_limotint_001`)
 - re-checks every converted model's structure before packing
+
+## Car sound tuner
+
+**Double-click `Tune-CarSound.cmd`**: type part of a car's name, pick it, move the sliders and press **Apply** with the game closed. Every slider adds to the car's stock sound (0 = stock; hover a slider for what it does):
+
+| Tab | Sliders |
+|---|---|
+| Exhaust, Engine, Intake | **Volume** (every layer), **Idle** (the layer recorded at the lowest RPM, e.g. `Exhaust_00720`), **Highs** / **Lows** (the high band of the tracks' 3-band EQs / the low band of the group's EQ; the window shows the resulting EQ gain, at most +10 dB), **Grit** (the Turn10Saturator's drive) |
+| Turbo & other | Turbo, DSC and CSC superchargers, blow-off valve, backfires, the low-frequency (LFE) layer |
+
+The car's bank is built from the game's own each time and written to `Mount\mediapc`, so Revert / Reset to stock / Apply can be used freely; settings are kept per car in `Mount\mediapc\audio\fmodanthem\durango\car-sound.json` and shared with `Set-BoostVolume`. Found by experiment on the 1968 Dart: one layer much past +20 dB distorts, and so does a few boosted layers that play together (idle exhaust +20 with engine and intake idle +12); a boomy car gets better with the LFE layer down and Lows down, and the exhaust's Highs up adds crackle. Every car's off-throttle burble track is automated (by RPM), so it has no slider yet. Coverage over the 351 car banks: exhaust 349 (EQ 344, grit 323), engine 327, intake 329, backfires 350, LFE layer 96.
 
 ## Turbo and supercharger volume
 
