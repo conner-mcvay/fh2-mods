@@ -13,8 +13,16 @@
 #>
 param([string]$GameRoot, [string]$AzimuthRoot)
 $ErrorActionPreference = 'Stop'
+# draw at the screen's real resolution (system DPI aware, which Windows Forms scales to; without this Windows stretches
+# a 96-DPI bitmap, blurry on 4K)
+Add-Type -Namespace FH2Tuner -Name Dpi -MemberDefinition '[DllImport("shcore.dll")] public static extern int SetProcessDpiAwareness(int v); [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();'
+try { [void][FH2Tuner.Dpi]::SetProcessDpiAwareness(1) } catch { [void][FH2Tuner.Dpi]::SetProcessDPIAware() }
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
+# the layout is in 96-DPI pixels, scaled here to the screen's DPI (fonts, in points, scale by themselves)
+$script:k = [Drawing.Graphics]::FromHwnd([IntPtr]::Zero).DpiX / 96
+function P([double]$x, [double]$y) { New-Object Drawing.Point([int]($x * $script:k), [int]($y * $script:k)) }
+function Sz([double]$w, [double]$h) { New-Object Drawing.Size([int]($w * $script:k), [int]($h * $script:k)) }
 try { . (Join-Path $PSScriptRoot 'CarSound.ps1'); $ctx = Resolve-CarSoundFolders $GameRoot $AzimuthRoot }
 catch { [void][Windows.Forms.MessageBox]::Show("$_", 'FH2 car sound tuner'); return }   # (run from Tune-CarSound.cmd, there's no console)
 
@@ -35,30 +43,30 @@ $sliders = @(
   @('IntakeHighs', 'Highs', 'Intake', -24, 24, 'The high band of the intake EQs, in dB (EQ limit +10 dB).'),
   @('IntakeLows', 'Lows', 'Intake', -24, 24, 'The low band of the intake EQ, in dB (EQ limit +10 dB).'),
   @('IntakeGrit', 'Grit', 'Intake', -20, 20, 'The intake saturator''s drive.'),
-  @('Turbo', 'Turbo', 'Turbo & other', -24, 48, 'The turbo sounds on the turbo''s upgrade levels (single and twin), in dB. The spool whistle is Boost whistle.'),
-  @('Whistle', 'Boost whistle', 'Turbo & other', -24, 48, 'The spool whistle and intake air that follow boost (WhistleLooping, AirLooping), in dB.'),
-  @('DSC', 'Supercharger (DSC)', 'Turbo & other', -24, 48, 'Positive-displacement supercharger whine, in dB.'),
-  @('CSC', 'Supercharger (CSC)', 'Turbo & other', -24, 48, 'Centrifugal supercharger whine, in dB.'),
-  @('BOV', 'Blow-off valve', 'Turbo & other', -24, 48, 'Blow-off valve, in dB (on top of Turbo where it''s part of the turbo sound).'),
+  @('Turbo', 'Turbo', 'Turbo & other', -24, 24, 'The turbo sounds on the turbo''s upgrade levels (single and twin), in dB. The spool whistle is Boost whistle.'),
+  @('Whistle', 'Boost whistle', 'Turbo & other', -24, 24, 'The spool whistle and intake air that follow boost (WhistleLooping, AirLooping), in dB.'),
+  @('DSC', 'Supercharger (DSC)', 'Turbo & other', -24, 24, 'Positive-displacement supercharger whine, in dB.'),
+  @('CSC', 'Supercharger (CSC)', 'Turbo & other', -24, 24, 'Centrifugal supercharger whine, in dB.'),
+  @('BOV', 'Blow-off valve', 'Turbo & other', -24, 24, 'Blow-off valve, in dB (on top of Turbo where it''s part of the turbo sound).'),
   @('Backfire', 'Backfires', 'Turbo & other', -24, 24, 'Backfire pops, in dB.'),
   @('LowFreq', 'Low-frequency layer', 'Turbo & other', -24, 24, 'The separate sub-bass layer some cars have (LFE), in dB. Lower it if the car is boomy.')
 )
 
-$form = New-Object Windows.Forms.Form -Property @{ Text = 'FH2 car sound tuner'; Size = New-Object Drawing.Size(920, 640); StartPosition = 'CenterScreen'; MinimumSize = New-Object Drawing.Size(820, 560) }
-$font = New-Object Drawing.Font('Segoe UI', 9); $form.Font = $font
+$form = New-Object Windows.Forms.Form -Property @{ Text = 'FH2 car sound tuner'; Size = (Sz 920 640); StartPosition = 'CenterScreen'; MinimumSize = (Sz 820 560) }
+$font = New-Object Drawing.Font('Segoe UI', 9); $form.Font = $font; $form.AutoScaleMode = 'None'   # (scaled by P / Sz)
 $tip = New-Object Windows.Forms.ToolTip -Property @{ AutoPopDelay = 15000 }
 
-$search = New-Object Windows.Forms.TextBox -Property @{ Location = New-Object Drawing.Point(12, 34); Width = 250 }
-$searchLabel = New-Object Windows.Forms.Label -Property @{ Text = 'Car (type part of a name):'; Location = New-Object Drawing.Point(12, 12); AutoSize = $true }
-$list = New-Object Windows.Forms.ListBox -Property @{ Location = New-Object Drawing.Point(12, 62); Size = New-Object Drawing.Size(250, 480); Anchor = 'Top,Bottom,Left'; IntegralHeight = $false }
-$title = New-Object Windows.Forms.Label -Property @{ Location = New-Object Drawing.Point(280, 10); AutoSize = $true; Font = New-Object Drawing.Font('Segoe UI', 12, [Drawing.FontStyle]::Bold); Text = 'Pick a car' }
-$info = New-Object Windows.Forms.Label -Property @{ Location = New-Object Drawing.Point(282, 36); Size = New-Object Drawing.Size(610, 20); Anchor = 'Top,Left,Right'; ForeColor = [Drawing.Color]::DimGray;
+$search = New-Object Windows.Forms.TextBox -Property @{ Location = (P 12 34); Size = (Sz 250 24) }
+$searchLabel = New-Object Windows.Forms.Label -Property @{ Text = 'Car (type part of a name):'; Location = (P 12 12); AutoSize = $true }
+$list = New-Object Windows.Forms.ListBox -Property @{ Location = (P 12 62); Size = (Sz 250 480); Anchor = 'Top,Bottom,Left'; IntegralHeight = $false }
+$title = New-Object Windows.Forms.Label -Property @{ Location = (P 280 10); AutoSize = $true; Font = New-Object Drawing.Font('Segoe UI', 12, [Drawing.FontStyle]::Bold); Text = 'Pick a car' }
+$info = New-Object Windows.Forms.Label -Property @{ Location = (P 282 36); Size = (Sz 610 20); Anchor = 'Top,Left,Right'; ForeColor = [Drawing.Color]::DimGray;
   Text = 'Each slider adds to the car''s stock sound (0 = stock). Hover a slider''s name for what it does.' }
-$tabs = New-Object Windows.Forms.TabControl -Property @{ Location = New-Object Drawing.Point(280, 62); Size = New-Object Drawing.Size(612, 420); Anchor = 'Top,Bottom,Left,Right' }
-$apply = New-Object Windows.Forms.Button -Property @{ Text = 'Apply'; Location = New-Object Drawing.Point(280, 494); Size = New-Object Drawing.Size(110, 30); Anchor = 'Bottom,Left'; Enabled = $false }
-$reset = New-Object Windows.Forms.Button -Property @{ Text = 'Reset to stock'; Location = New-Object Drawing.Point(398, 494); Size = New-Object Drawing.Size(120, 30); Anchor = 'Bottom,Left'; Enabled = $false }
-$revert = New-Object Windows.Forms.Button -Property @{ Text = 'Revert'; Location = New-Object Drawing.Point(526, 494); Size = New-Object Drawing.Size(90, 30); Anchor = 'Bottom,Left'; Enabled = $false }
-$status = New-Object Windows.Forms.Label -Property @{ Location = New-Object Drawing.Point(280, 534); Size = New-Object Drawing.Size(612, 40); Anchor = 'Bottom,Left,Right' }
+$tabs = New-Object Windows.Forms.TabControl -Property @{ Location = (P 280 62); Size = (Sz 612 420); Anchor = 'Top,Bottom,Left,Right' }
+$apply = New-Object Windows.Forms.Button -Property @{ Text = 'Apply'; Location = (P 280 494); Size = (Sz 110 30); Anchor = 'Bottom,Left'; Enabled = $false }
+$reset = New-Object Windows.Forms.Button -Property @{ Text = 'Reset to stock'; Location = (P 398 494); Size = (Sz 120 30); Anchor = 'Bottom,Left'; Enabled = $false }
+$revert = New-Object Windows.Forms.Button -Property @{ Text = 'Revert'; Location = (P 526 494); Size = (Sz 90 30); Anchor = 'Bottom,Left'; Enabled = $false }
+$status = New-Object Windows.Forms.Label -Property @{ Location = (P 280 534); Size = (Sz 612 40); Anchor = 'Bottom,Left,Right' }
 $tip.SetToolTip($apply, 'Write the car''s sound with these settings (close the game first). Start the game to hear it.')
 $tip.SetToolTip($reset, 'Set every slider to 0 (then Apply to put the car back to stock).')
 $tip.SetToolTip($revert, 'Back to what''s applied now.')
@@ -73,9 +81,9 @@ foreach ($s in $sliders) {
     $tabs.TabPages.Add($p); $pages[$tabName] = @{ Page = $p; Y = 14 }
   }
   $pg = $pages[$tabName]
-  $name = New-Object Windows.Forms.Label -Property @{ Text = $s[1]; Location = New-Object Drawing.Point(12, ($pg.Y + 8)); Size = New-Object Drawing.Size(150, 20) }
-  $bar = New-Object Windows.Forms.TrackBar -Property @{ Location = New-Object Drawing.Point(165, $pg.Y); Size = New-Object Drawing.Size(270, 45); Minimum = $s[3] * 2; Maximum = $s[4] * 2; TickFrequency = 4; SmallChange = 1; LargeChange = 4; Value = 0; Enabled = $false }
-  $val = New-Object Windows.Forms.Label -Property @{ Location = New-Object Drawing.Point(445, ($pg.Y + 8)); Size = New-Object Drawing.Size(150, 20) }
+  $name = New-Object Windows.Forms.Label -Property @{ Text = $s[1]; Location = (P 12 (($pg.Y + 8))); Size = (Sz 150 20) }
+  $bar = New-Object Windows.Forms.TrackBar -Property @{ Location = (P 165 $pg.Y); Size = (Sz 270 45); Minimum = $s[3] * 2; Maximum = $s[4] * 2; TickFrequency = 4; SmallChange = 1; LargeChange = 4; Value = 0; Enabled = $false }
+  $val = New-Object Windows.Forms.Label -Property @{ Location = (P 445 (($pg.Y + 8))); Size = (Sz 150 20) }
   $tip.SetToolTip($name, $s[5]); $tip.SetToolTip($bar, $s[5])
   $pg.Page.Controls.AddRange(@($name, $bar, $val))
   $bar.Tag = $s[0]

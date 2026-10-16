@@ -297,7 +297,7 @@ public class FmodBank {
   List<Target> FindTargets() {
     var list = new List<Target>();
     foreach (var s in Sounds)   // Turbo / DSC / CSC / BOV, found by Find()
-      list.Add(new Target { Setting = s.Kind, Offset = s.VolumeOffset, Stock = s.StockVolume, Min = -80, Max = 60, What = s.Kind + " " + s.Range });
+      list.Add(new Target { Setting = s.Kind, Offset = s.VolumeOffset, Stock = s.StockVolume, Min = -80, Max = 30, What = s.Kind + " " + s.Range });
 
     var lfe = new Regex("(^|_)LFE(_|$)", RegexOptions.IgnoreCase);
     var rpm = new Regex(@"(\d{3,5})(?!.*\d{3})");
@@ -311,7 +311,7 @@ public class FmodBank {
     }
     var seenBoost = new HashSet<int>();
     foreach (var l in Layers().Where(l => l.Sheet == "Boost" && (l.Type == "WAIT" || l.Type == "MUIT") && !l.VolumeAutomated && l.Volume > -40))
-      if (seenBoost.Add(l.VolumeOffset)) list.Add(new Target { Setting = "Whistle", Offset = l.VolumeOffset, Stock = l.Volume, Min = -80, Max = 60, What = string.Join(", ", l.Samples) });
+      if (seenBoost.Add(l.VolumeOffset)) list.Add(new Target { Setting = "Whistle", Offset = l.VolumeOffset, Stock = l.Volume, Min = -80, Max = 40, What = string.Join(", ", l.Samples) });
     foreach (var s in SoundsTuned) {   // idle: the layer recorded at the lowest RPM
       var mine = layers.Where(l => !lfe.IsMatch(l.Category) && l.Category.StartsWith(s, StringComparison.OrdinalIgnoreCase) && l.Samples.Length > 0).ToList();
       Func<FmodLayer, int> at = l => { var m = rpm.Match(l.Samples[0]); return m.Success ? int.Parse(m.Groups[1].Value) : 100000 + (int)l.Start; };

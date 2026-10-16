@@ -146,13 +146,13 @@ FH2 compiles each shader variant for one vertex format: in FH2's own cars a mesh
 | Tab | Sliders |
 |---|---|
 | Exhaust, Engine, Intake | **Volume** (every layer), **Idle** (the layer recorded at the lowest RPM, e.g. `Exhaust_00720`), **Highs** / **Lows** (the high band of the tracks' 3-band EQs / the low band of the group's EQ; the window shows the resulting EQ gain, at most +10 dB), **Grit** (the Turn10Saturator's drive) |
-| Turbo & other | Turbo (its upgrade-level sounds), **Boost whistle** (the spool whistle and air loops on the `Boost` sheet: `WhistleLooping`, `AirLooping`; 318 cars), DSC and CSC superchargers, blow-off valve (these up to +48 dB), backfires, the low-frequency (LFE) layer |
+| Turbo & other | Turbo (its upgrade-level sounds), **Boost whistle** (the spool whistle and air loops on the `Boost` sheet: `WhistleLooping`, `AirLooping`; 318 cars), DSC and CSC superchargers, blow-off valve, backfires, the low-frequency (LFE) layer |
 
 The car's bank is built from the game's own each time and written to `Mount\mediapc`, so Revert / Reset to stock / Apply can be used freely; settings are kept per car in `Mount\mediapc\audio\fmodanthem\durango\car-sound.json` and shared with `Set-BoostVolume`. Found by experiment on the 1968 Dart: one layer much past +20 dB distorts, and so does a few boosted layers that play together (idle exhaust +20 with engine and intake idle +12); a boomy car gets better with the LFE layer down and Lows down, and the exhaust's Highs up adds crackle. Every car's off-throttle burble track is automated (by RPM), so it has no slider yet. Coverage over the 351 car banks: exhaust 349 (EQ 344, grit 323), engine 327, intake 329, backfires 350, LFE layer 96.
 
 ## Turbo and supercharger volume
 
-**Double-click `Set-BoostVolume.cmd`**, pick the cars (type part of a name like `mustang` and pick numbers from the list of matches, which shows each car's sounds and current setting; or `all`) and type the dB to add to each sound (Enter keeps the current setting), including the blow-off valve (BOV): turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud, +24 loud, +48 the most. Close the game first.
+**Double-click `Set-BoostVolume.cmd`**, pick the cars (type part of a name like `mustang` and pick numbers from the list of matches, which shows each car's sounds and current setting; or `all`) and type the dB to add to each sound (Enter keeps the current setting), including the blow-off valve (BOV): turbo, positive-displacement supercharger (DSC), centrifugal supercharger (CSC). +6 dB is about twice as loud; +24 (the most) is loud. Close the game first.
 
 ```powershell
 .\tools\audio\Set-BoostVolume.ps1 -Car FOR_MustangGT500_13 -DSC 12        # louder supercharger whine

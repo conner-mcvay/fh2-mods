@@ -31,7 +31,7 @@
 [CmdletBinding()]
 param(
   [string[]]$Car,             # car MediaNames (FOR_MustangGT500_13), part of a name (mustang), wildcards, or all
-  [double]$Turbo = 0,         # dB to add to the turbo sounds (-80 to 48; 0 = leave as stock)
+  [double]$Turbo = 0,         # dB to add to the turbo sounds (-80 to 24; 0 = leave as stock)
   [double]$DSC = 0,           # dB to add to the positive-displacement supercharger sounds
   [double]$CSC = 0,           # dB to add to the centrifugal supercharger sounds
   [double]$BOV = 0,           # dB to add to the blow-off valve sounds (on top of -Turbo where they're part of the turbo sound)
@@ -93,7 +93,7 @@ if ($interactive) {
     Write-Host "  added: $($chosen -join ', ')" -ForegroundColor Green
   }
   $Car = $picked
-  Write-Host "`ndB to add to each sound (0 = stock; +6 is about twice as loud, +24 is loud; up to 48). Enter keeps each car's current setting."
+  Write-Host "`ndB to add to each sound (0 = stock; +6 is about twice as loud, +24 is loud; up to 24). Enter keeps each car's current setting."
   foreach ($k in @(@('Turbo', 'Turbo (single and twin)'), @('DSC', 'Positive-displacement supercharger (DSC)'), @('CSC', 'Centrifugal supercharger (CSC)'), @('BOV', 'Blow-off valve (BOV)'))) {
     $a = Ask "  $($k[1])"
     if ($a) { Set-Variable $k[0] ([double]$a); $interactiveGiven += $k[0] }
@@ -118,7 +118,7 @@ if ($Remove) {
   return
 }
 
-foreach ($g in $Turbo, $DSC, $CSC, $BOV) { if ($g -lt -80 -or $g -gt 48) { throw 'Gains must be between -80 and 48 dB' } }
+foreach ($g in $Turbo, $DSC, $CSC, $BOV) { if ($g -lt -80 -or $g -gt 24) { throw 'Gains must be between -80 and 24 dB' } }
 # the settings given now; the others (here and from Tune-CarSound) keep what was set before
 $given = @($boost | Where-Object { $interactiveGiven -contains $_ -or $PSBoundParameters.ContainsKey($_) })
 if (-not $given) { throw 'Pass -Turbo, -DSC, -CSC and/or -BOV (dB to add; 0 = stock), or -Remove' }
