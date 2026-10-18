@@ -8,3 +8,4 @@ __pycache__/
 tools/online/**/out/
 tools/online/server/captures/
 tools/online/server/data/
+tools/wheels/out/

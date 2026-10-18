@@ -1,0 +1,5 @@
+LIBRARY "azimuth-tls.dll"
+EXPORTS
+  azimuth_tls_index = fh2wheels-next.azimuth_tls_index DATA
+  azimuth_tls_attached = fh2wheels-next.azimuth_tls_attached DATA
+  Fh2TweaksStatus = fh2wheels-next.Fh2TweaksStatus

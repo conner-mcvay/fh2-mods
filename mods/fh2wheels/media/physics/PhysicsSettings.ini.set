@@ -1,0 +1,3 @@
+# fh2wheels: camber tuning range (degrees), stock -5 / 5
+CarTuning\TuneCamberMin -15
+CarTuning\TuneCamberMax 15
