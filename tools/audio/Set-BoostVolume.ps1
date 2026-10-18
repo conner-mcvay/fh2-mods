@@ -7,7 +7,7 @@
   positive-displacement supercharger (DSC) and the centrifugal supercharger (CSC) are separate sounds, played when the
   car has that part fitted (tools\audio\FmodBank.cs). This changes their volume by the given dB, starting from your
   game's own bank each time (so running it again replaces the earlier change), and writes the bank to Mount\mediapc,
-  which Extra Options (0.2.74+, [Files] EnableMediaOverrides=1) makes the game read first. The game's own files are
+  which FH2 Extra Options ([Files] EnableMediaOverrides=1) makes the game read first. The game's own files are
   not changed. Tune-CarSound.cmd has sliders for these and the rest of a car's sound (exhaust, engine, intake, ...);
   both keep the same per-car settings, so settings this doesn't pass stay as they are.
 
@@ -122,7 +122,7 @@ foreach ($g in $Turbo, $DSC, $CSC, $BOV) { if ($g -lt -80 -or $g -gt 24) { throw
 # the settings given now; the others (here and from Tune-CarSound) keep what was set before
 $given = @($boost | Where-Object { $interactiveGiven -contains $_ -or $PSBoundParameters.ContainsKey($_) })
 if (-not $given) { throw 'Pass -Turbo, -DSC, -CSC and/or -BOV (dB to add; 0 = stock), or -Remove' }
-$ini = if ($ctx.AzimuthRoot) { Join-Path $ctx.AzimuthRoot 'data\bin\FH2_ExtraOptions.ini' }
+$ini = (Get-ExtraOptionsState $ctx).Ini
 if ($ini -and (Test-Path $ini) -and (Get-Content $ini -Raw) -notmatch '(?m)^\s*EnableMediaOverrides\s*=\s*1') {
   Write-Warning "Extra Options' [Files] EnableMediaOverrides isn't 1 in $ini; the game won't read Mount\mediapc until it is (the FM5 car importer turns it on)."
 }

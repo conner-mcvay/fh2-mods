@@ -8,8 +8,8 @@ This package contains **no game files**. It reads your own game's sound files an
 
 | | |
 |---|---|
-| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.9** |
-| FH2 Extra Options | **0.2.74 or later**, installed in Azimuth. It's what makes the game load the changed sounds (from `Mount\mediapc`); the tuner offers to turn on its `[Files] EnableMediaOverrides=1` setting when it's off. |
+| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.10** (0.9.9 also works) |
+| FH2 Extra Options | the build for your Azimuth: for **0.9.10**, `winmm.dll` (with `FH2_ExtraOptions.ini`) beside `azimuth.exe`; for 0.9.9, **0.2.74 or later** in `data\bin`. It's what makes the game load the changed sounds (from `Mount\mediapc`); the tuner offers to turn on its `[Files] EnableMediaOverrides=1` setting when it's off. |
 | Windows | 10 or 11, with the built-in Windows PowerShell 5.1 (nothing to install) |
 
 ## Quick start

@@ -2,8 +2,9 @@
 .SYNOPSIS
   Installs fh2net into Azimuth (or removes it with -Uninstall). Close the game first.
 .DESCRIPTION
-  Azimuth loads data\bin\azimuth-tls.dll. The one there now (Extra Options') is renamed azimuth-tls-next.dll and
-  fh2net.dll takes its name; fh2net loads Extra Options itself, so both keep working. fh2net.ini is copied into
+  Azimuth loads data\bin\azimuth-tls.dll. The one there now (Extra Options' for Azimuth 0.9.9, Azimuth's own for
+  0.9.10, where Extra Options is winmm.dll beside azimuth.exe) is renamed azimuth-tls-next.dll and fh2net.dll takes
+  its name; fh2net loads it itself, so both keep working. fh2net.ini is copied into
   data\bin only if there isn't one yet. -Uninstall puts Extra Options back as azimuth-tls.dll and leaves
   fh2net.ini (it does nothing without fh2net).
 .EXAMPLE
@@ -34,7 +35,11 @@ if (& $isOurs $cur) {
   Write-Host 'Updating fh2net.'
 } else {
   if (Test-Path -LiteralPath $next) { throw "Both azimuth-tls.dll and azimuth-tls-next.dll exist and neither is fh2net; move one away first." }
-  if (-not [IO.File]::ReadAllText($cur, [Text.Encoding]::ASCII).Contains('game:\mediapc\')) { Write-Warning 'azimuth-tls.dll does not look like Extra Options 0.2.74+; continuing anyway.' }
+  # Extra Options is winmm.dll beside azimuth.exe for Azimuth 0.9.10+, azimuth-tls.dll (0.2.74+) for 0.9.9
+  $eoWinmm = Join-Path $AzimuthRoot 'winmm.dll'
+  $eoFound = ((Test-Path -LiteralPath $eoWinmm) -and [IO.File]::ReadAllText($eoWinmm, [Text.Encoding]::ASCII).Contains('game:\mediapc\')) -or
+    [IO.File]::ReadAllText($cur, [Text.Encoding]::ASCII).Contains('game:\mediapc\')
+  if (-not $eoFound) { Write-Warning 'Extra Options was not found (winmm.dll beside azimuth.exe, or azimuth-tls.dll 0.2.74+); continuing anyway.' }
   Rename-Item -LiteralPath $cur 'azimuth-tls-next.dll'
 }
 Copy-Item -LiteralPath $ours $cur -Force

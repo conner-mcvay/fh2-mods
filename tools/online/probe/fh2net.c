@@ -479,6 +479,7 @@ static const AzimuthLayout *azimuth_layout(void);
 static const AzimuthLayout g_azimuthLayouts[] = {
   { "0.9.7", 0x24FF10, 0x250218, { 0x239B0, 0x239D0, 0x23A20 }, { 0x23EE0, 0x23F00, 0x23F50 }, 0x23855 },
   { "0.9.9", 0x29D718, 0x29D460, { 0x40BF0, 0x40C10, 0x40C60 }, { 0x41150, 0x41170, 0x411C0 }, 0x40A95 },
+  { "0.9.10", 0x2B3F60, 0x2B3C88, { 0x42560, 0x42580, 0x425D0 }, { 0x42AC0, 0x42AE0, 0x42B30 }, 0x42405 },
 };
 
 // LocalUser slots 16-18 and LocalUserStatics slots 15-17: GetTokenAndSignatureAsync and its ...ForAllUsers

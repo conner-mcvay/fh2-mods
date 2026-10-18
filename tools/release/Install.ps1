@@ -5,8 +5,8 @@
 .DESCRIPTION
   Reads install.json next to this script. The mod's files go into Mount\mediapc, Extra Options' override folder:
   the game reads it before Mount\media and doesn't filter it by Mount\hash.manifest, so the game's own files and
-  azimuth.exe stay untouched. Needs Extra Options 0.2.74 or later in Azimuth's data\bin; turns its
-  [Files] EnableMediaOverrides on if it's off.
+  azimuth.exe stay untouched. Needs FH2 Extra Options (winmm.dll beside azimuth.exe for Azimuth 0.9.10, or 0.2.74+
+  in data\bin for 0.9.9); turns its [Files] EnableMediaOverrides on if it's off.
 
   Checks the game version, refuses to overwrite files another mod already put in Mount\mediapc (unless -Force; a
   layered package expects exactly the files it was built on), backs up every file it replaces, and copies the
@@ -37,14 +37,14 @@ if (-not (Test-Path -LiteralPath $exe) -or (Sha $exe) -ne $m.game_exe_sha256) { 
 if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($AzimuthRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Close Azimuth first.' }
 if ($m.install_folder -ne 'mediapc') { throw 'This package was made for an older installer (it patches azimuth.exe); build it again with the current fh2-mods tools.' }
 
-# Extra Options with the override folders (0.2.74+): its DLL is data\bin\azimuth-tls.dll, or azimuth-tls-next.dll
-# when another DLL (e.g. fh2net) sits in front of it
+# Extra Options with the override folders, its ini beside its DLL: for Azimuth 0.9.10+ winmm.dll beside azimuth.exe;
+# for 0.9.9 (0.2.74+) data\bin\azimuth-tls.dll, or azimuth-tls-next.dll when another DLL (e.g. fh2net) sits in front
 $bin = Join-Path $AzimuthRoot 'data\bin'
-$eo = @('azimuth-tls.dll', 'azimuth-tls-next.dll' | ForEach-Object { Join-Path $bin $_ } | Where-Object {
+$eo = @((Join-Path $AzimuthRoot 'winmm.dll'), (Join-Path $bin 'azimuth-tls.dll'), (Join-Path $bin 'azimuth-tls-next.dll') | Where-Object {
   (Test-Path -LiteralPath $_) -and [IO.File]::ReadAllText($_, [Text.Encoding]::ASCII).Contains('game:\mediapc\')
 })
-if (-not $eo) { throw "Needs Extra Options 0.2.74 or later in $bin (it makes the game read mods from Mount\mediapc)." }
-$ini = Join-Path $bin 'FH2_ExtraOptions.ini'
+if (-not $eo) { throw "Needs FH2 Extra Options in $AzimuthRoot (winmm.dll for Azimuth 0.9.10, or 0.2.74+ in data\bin for 0.9.9): it makes the game read mods from Mount\mediapc." }
+$ini = Join-Path (Split-Path $eo[0]) 'FH2_ExtraOptions.ini'
 $iniText = if (Test-Path -LiteralPath $ini) { [IO.File]::ReadAllText($ini) } else { '' }
 $iniOn = [regex]::IsMatch($iniText, '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$')
 

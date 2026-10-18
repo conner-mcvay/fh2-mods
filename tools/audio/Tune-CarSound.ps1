@@ -171,8 +171,8 @@ $apply.Add_Click({
   }
   $eo = Get-ExtraOptionsState $ctx
   if ($eo.Known -and -not $eo.Installed) {
-    $status.Text = 'Not applied: needs FH2 Extra Options 0.2.74 or later.'
-    [void][Windows.Forms.MessageBox]::Show($form, "Extra Options 0.2.74 or later isn't installed in`n$($ctx.AzimuthRoot)`n`nIt's what makes the game read changed sounds (from Mount\mediapc). Install it, then Apply again.", 'FH2 car sound tuner', 'OK', 'Warning')
+    $status.Text = 'Not applied: needs FH2 Extra Options.'
+    [void][Windows.Forms.MessageBox]::Show($form, "FH2 Extra Options isn't installed in`n$($ctx.AzimuthRoot)`n`nIt's what makes the game read changed sounds (from Mount\mediapc). Install it (winmm.dll beside azimuth.exe for Azimuth 0.9.10, 0.2.74+ in data\bin for 0.9.9), then Apply again.", 'FH2 car sound tuner', 'OK', 'Warning')
     return
   }
   if ($eo.Known -and -not $eo.OverridesOn) {
@@ -197,7 +197,7 @@ function Show-Folders {   # the game folder in the title and status line, and wh
   $eo = Get-ExtraOptionsState $ctx
   $status.ForeColor = $(if ($eo.Known -and (-not $eo.Installed -or -not $eo.OverridesOn)) { [Drawing.Color]::DarkOrange } else { [Drawing.Color]::DimGray })
   $status.Text = "Game folder: $($ctx.GameRoot)   (* = tuned)" + $(
-    if (-not $eo.Known) { '' } elseif (-not $eo.Installed) { "`nExtra Options 0.2.74+ isn't installed in Azimuth: changes won't be heard until it is." }
+    if (-not $eo.Known) { '' } elseif (-not $eo.Installed) { "`nFH2 Extra Options isn't installed in Azimuth: changes won't be heard until it is." }
     elseif (-not $eo.OverridesOn) { "`nExtra Options' EnableMediaOverrides is off: Apply offers to turn it on." } else { '' })
 }
 $folders.Add_Click({

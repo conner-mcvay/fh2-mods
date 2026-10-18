@@ -19,7 +19,7 @@
 1. **Unblock the zip** before extracting: right-click the downloaded zip > *Properties* > tick **Unblock** > *OK*. (Windows marks downloaded files; unblocking avoids security prompts for each script.)
 2. **Extract** it to a folder you'll keep, e.g. `C:\FH2-Mods\fm5-car-importer`. Don't run it from inside the zip.
 3. Have ready:
-   - your **Azimuth** folder (the one with `azimuth.exe`, version 0.9.9), with **FH2 Extra Options 0.2.74 or later** installed in its `data\bin` (the importer turns on Extra Options' `[Files] EnableMediaOverrides=1`, which makes the game read `Mount\mediapc`)
+   - your **Azimuth** folder (the one with `azimuth.exe`, version 0.9.10 or 0.9.9), with **FH2 Extra Options** installed: for 0.9.10 its `winmm.dll` and `FH2_ExtraOptions.ini` beside `azimuth.exe`, for 0.9.9 version 0.2.74 or later in `data\bin` (the importer turns on Extra Options' `[Files] EnableMediaOverrides=1`, which makes the game read `Mount\mediapc`)
    - your **FH2** game folder (the one with `Mount\forza_durango_release_final.exe`, FH2 1.0.0.64)
    - your **FM5** game folder (the one with `Mount\media\db\gamedb.slt`, FM5 1.0.0.20)
 
@@ -228,10 +228,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\fm5-import\Import-Fm
 | `Close Azimuth first.` | Quit the game and Azimuth, then run again. |
 | `Can't read Mount\...; close the game first.` | Same: the game has the file open. |
 | `Unsupported game version` / `Unsupported game: needs FH2 1.0.0.64` | Only FH2 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`) is supported. |
-| `Needs Extra Options 0.2.74 or later in ...` | Install FH2 Extra Options 0.2.74+ into Azimuth's `data\bin` (as `azimuth-tls.dll`; with fh2net installed it is `azimuth-tls-next.dll`). Older versions can't load `Mount\mediapc`. |
-| Imported cars are missing in the game | Check `FH2_ExtraOptions.ini` in Azimuth's `data\bin` has `EnableMediaOverrides=1` under `[Files]`, and that you start the game through that Azimuth. |
+| `Needs FH2 Extra Options in ...` | Install the Extra Options build for your Azimuth: for 0.9.10, `winmm.dll`, `FH2_ExtraOptions.ini` and `Gamerpic.png` beside `azimuth.exe`; for 0.9.9, 0.2.74+ in `data\bin` (as `azimuth-tls.dll`; with fh2net installed it is `azimuth-tls-next.dll`). Older versions can't load `Mount\mediapc`. |
+| Imported cars are missing in the game | Check `FH2_ExtraOptions.ini` (beside `azimuth.exe` for 0.9.10, in `data\bin` for 0.9.9) has `EnableMediaOverrides=1` under `[Files]`, and that you start the game through that Azimuth. |
 | `This package was made for an older installer` | A 1.x package (it patched `azimuth.exe`). Build it again with 2.0. |
-| Upgrading from 1.x | 1.x put files in `Mount\media` and patched `Mount\hash.manifest` and `azimuth.exe`. Undo the 1.x layers with their `Uninstall.ps1` (newest first), or restore those files from a clean copy of the game, then re-import with 2.0 on Azimuth 0.9.9. |
+| Upgrading from 1.x | 1.x put files in `Mount\media` and patched `Mount\hash.manifest` and `azimuth.exe`. Undo the 1.x layers with their `Uninstall.ps1` (newest first), or restore those files from a clean copy of the game, then re-import with 2.x on Azimuth 0.9.10 (or 0.9.9). |
 | `sqlite download failed its hash check` | The download was blocked or changed. Download `sqlite-tools-win-x64-3470200.zip` from sqlite.org yourself, put `sqlite3.exe` in `tools\bin`, and run again. |
 | `FM5 car ... not found, or FH2 already has it` | Check the name with `-ListFm5Only`. Cars already in FH2 (stock or imported) can't be imported again. |
 | `Donor ... has no engine sound bank` | Pick a different sound donor. |
@@ -256,7 +256,7 @@ Other limitations:
 
 - Engine sounds are **borrowed** from an FH2 car.
 - Wheel-shop thumbnails for imported wheels are blank.
-- Only FM5 1.0.0.20 and FH2 1.0.0.64 on Azimuth 0.9.9 with Extra Options 0.2.74+ are supported.
+- Only FM5 1.0.0.20 and FH2 1.0.0.64 are supported, on Azimuth 0.9.10 with its Extra Options build or on Azimuth 0.9.9 with Extra Options 0.2.74+.
 - FM5-only interior or livery features that FH2 doesn't have aren't carried over.
 
 ## 11. What's in this package

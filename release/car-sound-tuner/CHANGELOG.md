@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1 (2026-10-18)
+
+- Supports **Azimuth 0.9.10** with its Extra Options build (`winmm.dll` and `FH2_ExtraOptions.ini` beside `azimuth.exe`). The tuner looked for Extra Options only in `data\bin` and said it wasn't installed. Azimuth 0.9.9 with Extra Options 0.2.74+ keeps working.
+
 ## 1.0.0 (2026-10-16)
 
 First release.

@@ -14,9 +14,9 @@
 
   Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb, other
   mods), and cars the game already has aren't offered. Each run gets its own backup folder (mod-backups\<Name>-<time>)
-  with an Uninstall.ps1; undo runs newest first. The cars install into Mount\mediapc, which Extra Options (0.2.74 or
-  later) makes the game read before Mount\media; the game's own files aren't changed. Requires FH2 1.0.0.64 on
-  Azimuth with Extra Options 0.2.74+, and FM5 1.0.0.20.
+  with an Uninstall.ps1; undo runs newest first. The cars install into Mount\mediapc, which FH2 Extra Options makes
+  the game read before Mount\media; the game's own files aren't changed. Requires FH2 1.0.0.64 on Azimuth 0.9.10
+  with Extra Options (winmm.dll beside azimuth.exe) or 0.9.9 with Extra Options 0.2.74+, and FM5 1.0.0.20.
   sqlite3.exe is downloaded from sqlite.org (hash-checked) if it isn't on PATH.
 
 .EXAMPLE
@@ -31,7 +31,7 @@
 [CmdletBinding()]
 param(
   [string]$Fm5Root,                          # FM5 folder containing Mount
-  [string]$GameRoot,                         # FH2 folder containing Mount (default: Azimuth's game_folder)
+  [string]$GameRoot,                         # FH2 folder containing Mount (default: the one Azimuth is set to)
   [string]$AzimuthRoot,                      # folder containing azimuth.exe
   [string[]]$Car,                            # FM5 MediaNames or Ids (omit to be asked)
   [string[]]$Donor,                          # FH2 data donor per car (MediaName or Id); "" = automatic (same make, nearest year)
@@ -79,7 +79,9 @@ if ($askFolders) { Write-Host "`nFM5 -> FH2 car importer`n" -ForegroundColor Cya
 if (-not $NoInstall -or $AzimuthRoot) { $AzimuthRoot = Get-Folder 'Azimuth folder' $AzimuthRoot $saved.AzimuthRoot $isAzimuth 'the folder containing azimuth.exe' }
 $iniGame = $null
 if ($AzimuthRoot -and (Test-Path "$AzimuthRoot\data\azimuth.ini")) {
-  $m = [regex]::Match((Get-Content "$AzimuthRoot\data\azimuth.ini" -Raw), '(?m)^game_folder=(.+?)\s*$'); if ($m.Success) { $iniGame = $m.Groups[1].Value }
+  # game_folder= (older Azimuth), or folder= in the FH2 title's section [title-1a96545b] (0.9.9+)
+  $m = [regex]::Match((Get-Content "$AzimuthRoot\data\azimuth.ini" -Raw), '(?m)^game_folder=(.+?)\s*$|(?ms)^\[title-1a96545b\][^\[]*?^folder=(.+?)\s*$')
+  if ($m.Success) { $iniGame = $(if ($m.Groups[1].Success) { $m.Groups[1].Value } else { $m.Groups[2].Value }) }
 }
 $GameRoot = Get-Folder 'FH2 game folder' $GameRoot $(if ($iniGame) { $iniGame } else { $saved.GameRoot }) $isFh2 'the folder containing Mount\forza_durango_release_final.exe'
 

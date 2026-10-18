@@ -50,14 +50,15 @@ function Save-GameFolders([string]$AzimuthRoot, [string]$GameRoot) {   # remembe
   $j | ConvertTo-Json | Set-Content $p -Encoding UTF8
 }
 
-# Extra Options 0.2.74+ makes the game read Mount\mediapc, with [Files] EnableMediaOverrides=1 in its ini. Its DLL is
+# Extra Options makes the game read Mount\mediapc, with [Files] EnableMediaOverrides=1 in its ini (beside its DLL).
+# For Azimuth 0.9.10+ the DLL is winmm.dll beside azimuth.exe; for 0.9.9 (Extra Options 0.2.74+) it is
 # data\bin\azimuth-tls.dll, or azimuth-tls-next.dll when another DLL (fh2net) sits in front of it.
 function Get-ExtraOptionsState($ctx) {
   if (-not $ctx.AzimuthRoot) { return [pscustomobject]@{ Known = $false; Installed = $false; OverridesOn = $false; Ini = $null } }
   $bin = Join-Path $ctx.AzimuthRoot 'data\bin'
-  $eo = @('azimuth-tls.dll', 'azimuth-tls-next.dll' | ForEach-Object { Join-Path $bin $_ } | Where-Object {
+  $eo = @((Join-Path $ctx.AzimuthRoot 'winmm.dll'), (Join-Path $bin 'azimuth-tls.dll'), (Join-Path $bin 'azimuth-tls-next.dll') | Where-Object {
     (Test-Path -LiteralPath $_) -and [IO.File]::ReadAllText($_, [Text.Encoding]::ASCII).Contains('game:\mediapc\') })
-  $ini = Join-Path $bin 'FH2_ExtraOptions.ini'
+  $ini = Join-Path $(if ($eo) { Split-Path $eo[0] } else { $ctx.AzimuthRoot }) 'FH2_ExtraOptions.ini'
   $text = if (Test-Path -LiteralPath $ini) { [IO.File]::ReadAllText($ini) } else { '' }
   [pscustomobject]@{ Known = $true; Installed = [bool]$eo; Ini = $ini
     OverridesOn = [regex]::IsMatch($text, '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$') }

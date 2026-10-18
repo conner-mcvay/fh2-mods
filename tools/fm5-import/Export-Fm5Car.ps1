@@ -289,9 +289,10 @@ $('=' * $title.Length)
 Adds the Forza Motorsport 5 $media (car Id $CarId) to Forza Horizon 2 as a new
 car in the Autoshow.
 
-Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth with
-Extra Options 0.2.74 or later: the mod's files go into Mount\mediapc, which
-Extra Options makes the game read before Mount\media.
+Requires FH2 1.0.0.64 (Anthem_1.0.0.64_x64__8wekyb3d8bbwe) on Azimuth 0.9.10
+with FH2 Extra Options (or 0.9.9 with Extra Options 0.2.74+): the mod's files
+go into Mount\mediapc, which Extra Options makes the game read before
+Mount\media.
 
 Known limitations:
   - The car's name shows blank in menus

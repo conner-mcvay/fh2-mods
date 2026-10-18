@@ -7,6 +7,7 @@
     mods\<name>\media\Camera.zip\CameraSettings.ini       folder named like a zip: replacement/new entries for that zip
     mods\<name>\media\stripped\gamedbRC.slt\*.sql          folder named like a .slt: SQL patches, applied in name order
     mods\<name>\media\<path>\<file>                        anything else: loose file copied as-is
+    mods\<name>\media\<path>\<file>.set                    "key value" lines patched into the game's <file> (as in zips)
 
   Stock zips, databases and zipmanifest.xml are read from the game package (.zip of the Anthem_* folder) or from a
   game folder whose files are verified against tools\build\stock-hashes.json, so a build never starts from a modded file.
@@ -72,6 +73,18 @@ function Read-Fm5([string]$rel, [string]$dest) {
     if (-not (Test-Path $src -PathType Leaf)) { throw "FM5 file not found: $src" }
     Copy-Item $src $dest
   }
+}
+function Set-IniKeys([string]$file, [string]$set, [string]$label) {
+  # Patches "key value" lines of $file from the .set file $set (replacing a key's line, or adding it), keeping the
+  # file's other lines
+  $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($file))
+  foreach ($kv in Get-Content $set | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) {
+    $key, $val = $kv.Trim() -split '\s+', 2
+    $i = -1; for ($j = 0; $j -lt $lines.Count; $j++) { if (($lines[$j].Trim() -split '\s+', 2)[0] -ieq $key) { $i = $j; break } }
+    if ($i -ge 0) { $lines[$i] = "$key $val" } else { $lines.Add("$key $val") }
+    Write-Host "SET      ${label}: $key $val"
+  }
+  [IO.File]::WriteAllLines($file, $lines)
 }
 function Resolve-Sqlite {
   if ($script:Sqlite) { return $script:Sqlite }
@@ -149,14 +162,7 @@ try {
       foreach ($set in Get-ChildItem -Recurse -File $zd.FullName -Filter *.set) {
         $entry = Join-Path $zips[$rel] ($set.FullName.Substring($zd.FullName.Length + 1) -replace '\.set$', '')
         if (-not (Test-Path $entry)) { throw "$m\$($set.Name): $rel has no entry to patch" }
-        $lines = [Collections.Generic.List[string]]([IO.File]::ReadAllLines($entry))
-        foreach ($kv in Get-Content $set.FullName | Where-Object { $_.Trim() -and -not $_.TrimStart().StartsWith('#') }) {
-          $key, $val = $kv.Trim() -split '\s+', 2
-          $i = -1; for ($j = 0; $j -lt $lines.Count; $j++) { if (($lines[$j].Trim() -split '\s+', 2)[0] -ieq $key) { $i = $j; break } }
-          if ($i -ge 0) { $lines[$i] = "$key $val" } else { $lines.Add("$key $val") }
-          Write-Host "SET      $m\$rel\$($set.Name -replace '\.set$', ''): $key $val"
-        }
-        [IO.File]::WriteAllLines($entry, $lines)
+        Set-IniKeys $entry $set.FullName "$m\$rel\$($set.Name -replace '\.set$', '')"
       }
     }
 
@@ -175,10 +181,17 @@ try {
       }
     }
 
-    # loose files (outside any *.zip / *.slt folder)
+    # loose files (outside any *.zip / *.slt folder); <file>.set patches the game's (or the installed) file key by key
     foreach ($f in Get-ChildItem -Recurse -File $modMedia) {
       $rel = $f.FullName.Substring($modMedia.Length + 1)
       if ($rel -match '(^|\\)[^\\]+\.(zip|slt)\\') { continue }
+      if ($f.Name -like '*.set') {
+        $target = $rel -replace '\.set$', ''
+        $dest = Join-Path "$build\media" $target
+        if (-not (Test-Path $dest)) { New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null; Get-Stock $target $dest }
+        Set-IniKeys $dest $f.FullName "$m\$target"
+        continue
+      }
       Write-Host "FILE     $m\$rel"
       $dest = Join-Path "$build\media" $rel
       New-Item -ItemType Directory (Split-Path $dest) -Force | Out-Null
@@ -269,7 +282,7 @@ try {
 $version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json).game -match '(\d+\.\d+\.\d+\.\d+)') { $Matches[1] } else { 'unknown' }
 [ordered]@{
   name = $Name; mods = $Mod; layered = [bool]$Layer; game_version = $version; game_exe_sha256 = $gameSha
-  install_folder = 'mediapc'; requires = 'Extra Options 0.2.74 or later with [Files] EnableMediaOverrides=1'
+  install_folder = 'mediapc'; requires = 'FH2 Extra Options (Azimuth 0.9.10 build, or 0.2.74+ on 0.9.9) with [Files] EnableMediaOverrides=1'
   files = @($files)
 } | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot '..\release\Install.ps1'), (Join-Path $PSScriptRoot '..\release\Uninstall.ps1') $build
@@ -278,8 +291,8 @@ $installText = @"
 
 INSTALL (automatic)
 -------------------
-Needs Extra Options 0.2.74 or later (it reads mods from Mount\mediapc). Close Azimuth, then in PowerShell from
-this folder:
+Needs FH2 Extra Options (it reads mods from Mount\mediapc): for Azimuth 0.9.10, winmm.dll beside azimuth.exe; for
+0.9.9, 0.2.74 or later in data\bin. Close Azimuth, then in PowerShell from this folder:
 
   powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -GameRoot "<folder containing Mount>" -AzimuthRoot "<folder containing azimuth.exe>"
 

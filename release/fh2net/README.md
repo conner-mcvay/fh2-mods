@@ -12,12 +12,12 @@ Single player keeps working with fh2net installed: with the server running, even
 
 | | |
 |---|---|
-| Every player | FH2 1.0.0.64 on **Azimuth 0.9.9** (0.9.7 also works) with **FH2 Extra Options** installed |
+| Every player | FH2 1.0.0.64 on **Azimuth 0.9.10** (0.9.9 and 0.9.7 also work) with **FH2 Extra Options** installed (the build for your Azimuth) |
 | The server PC (one player, or any PC) | [Python 3](https://www.python.org/downloads/) with `pefile` (`py -3 -m pip install pefile`) and a copy of FH2 1.0.0.64 (the server reads message formats from the game's exe; nothing of the game is shipped) |
 
 ## How it works
 
-- **fh2net.dll** sits in front of Extra Options as Azimuth's `data\bin\azimuth-tls.dll` (Extra Options becomes `azimuth-tls-next.dll`, and fh2net loads it, so both keep working). It replaces Azimuth's offline stubs: the game sees an Xbox Live connection, its web requests go to your server, and its game traffic (UDP) goes to your server's relay.
+- **fh2net.dll** becomes Azimuth's `data\bin\azimuth-tls.dll`; the DLL that was there becomes `azimuth-tls-next.dll`, and fh2net loads it. On Azimuth 0.9.10 that is Azimuth's own (Extra Options is `winmm.dll` beside `azimuth.exe` and loads separately); on 0.9.9 it is Extra Options. Either way both keep working. It replaces Azimuth's offline stubs: the game sees an Xbox Live connection, its web requests go to your server, and its game traffic (UDP) goes to your server's relay.
 - **fh2srv.py** is the server. On TCP **8090** it answers the game's web calls (sign-in, Xbox Live session directory, profiles, liveries). On UDP **5101** it relays game traffic between consoles: each console simulates its own car and the relay forwards it to the others, as Turn 10's servers did.
 
 ## Setup
@@ -54,7 +54,7 @@ Over the internet, forward TCP 8090 and UDP 5101 on the server's router to the s
    | `[net] LocalAddress` | unique per player too: `ZmgybmV0LWxvY2FsLWRldmljZS0x`, `...ZS0y`, `...ZS0z` |
    | `[xbl] Gamertag` | your name in the session (empty: Azimuth's player name) |
 
-4. **Your save follows the Xuid.** Azimuth keeps it in `data\titles\1A96545B\saves\player-1\User_<Xuid in hex>`. With the default Xuid (`2533274790395904` = `User_9000000000000`) nothing changes. With another one, copy your `User_9000000000000` folder to the new name first (`...905` = `User_9000000000001`, `...906` = `User_9000000000002`), or the game starts a new save.
+4. **Your save follows the Xuid.** Azimuth keeps it in `<Azimuth folder>\data\titles\1A96545B\saves\player-1\User_<Xuid in hex>` (moving to a new Azimuth version, copy the whole `saves` folder to the same place under the new `data` folder). With the default Xuid (`2533274790395904` = `User_9000000000000`) nothing changes. With another one, copy your `User_9000000000000` folder to the new name first (`...905` = `User_9000000000001`, `...906` = `User_9000000000002`), or the game starts a new save.
 
 ### 3. Playing
 

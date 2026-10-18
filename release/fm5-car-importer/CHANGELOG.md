@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.2.0 (2026-10-18)
+
+- Supports **Azimuth 0.9.10** with its Extra Options build, which installs as `winmm.dll` (and `FH2_ExtraOptions.ini`) beside `azimuth.exe` instead of in `data\bin`. The installer finds Extra Options and its ini in either place, so Azimuth 0.9.9 with Extra Options 0.2.74+ keeps working.
+- The FH2 game folder is read from Azimuth's settings again (`folder=` in its FH2 section), so it's offered without typing it.
+
 ## 2.1.0 (2026-10-16)
 
 - `-ExportList <file>` writes the imported cars installed in a game, with all their choices, and `-FromList <file>` imports them on another PC (cars it already has are skipped). See the README's "Same cars on another PC".

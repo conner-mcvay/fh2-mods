@@ -2,13 +2,15 @@
 
 Monorepo for mods for Forza Horizon 2 on PC (game version 1.0.0.64, `Anthem_1.0.0.64_x64__8wekyb3d8bbwe`).
 
-Requires **Azimuth 0.9.9** and **[FH2 Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions) 0.2.74 or later**. Mods install into `Mount\mediapc`, which Extra Options mounts over the game's media folder (`[Files] EnableMediaOverrides=1`). The game's own files, `hash.manifest` and `azimuth.exe` are never changed.
+Requires **Azimuth 0.9.10** and **[FH2 Extra Options](https://github.com/RokkuDayo/ForzaHorizon2_ExtraOptions)** built for it (`winmm.dll`, `FH2_ExtraOptions.ini` and `Gamerpic.png` beside `azimuth.exe`). Azimuth 0.9.9 with Extra Options 0.2.74 or later (in `data\bin`) also works. Mods install into `Mount\mediapc`, which Extra Options mounts over the game's media folder (`[Files] EnableMediaOverrides=1`). The game's own files, `hash.manifest` and `azimuth.exe` are never changed.
+
+Azimuth 0.9.10 checks the game folder against version 1.0.0.64's own files: point it at a folder with the original `Mount\hash.manifest` (an importer 1.x install changed it). Its saves live in `<Azimuth folder>\data\titles\1A96545B\saves`; moving from 0.9.9, copy that `saves` folder to the same place, and set the launcher's options again (they start at the console's defaults, e.g. Car detail).
 
 | Mod | Description |
 |---|---|
 | [cockpit-fov](mods/cockpit-fov) | Cockpit/driver camera FOV 48 → 70 |
 
-The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired: Extra Options 0.2.74 does the same things (DLC unlock, stock rims for every car, photo mode limits) without changing game files.
+The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired: Extra Options does the same things (DLC unlock, stock rims for every car, photo mode limits) without changing game files.
 
 | Tool | Description |
 |---|---|
@@ -17,6 +19,7 @@ The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired:
 | [Car sound tuner](#car-sound-tuner) | Sliders for any car's sound: exhaust, engine and intake volume, idle, highs, lows and grit, the sub-bass layer, backfires, turbo, superchargers, blow-off valve (double-click `Tune-CarSound.cmd`). Release package: `tools\release\Make-SoundTunerRelease.ps1 -Version <x.y.z>`; user docs in `release/car-sound-tuner` |
 | [Turbo / supercharger volume](#turbo-and-supercharger-volume) | Makes any car's turbo, positive-displacement (DSC) or centrifugal (CSC) supercharger sound louder or quieter (double-click `Set-BoostVolume.cmd`) |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
+| [fh2wheels](#fh2wheels) | Front/rear wheel offset and tire profile upgrades under Tires & Rims, rim sizes from 13" to 26" for every car, wider ride height and camber tuning (an Azimuth DLL plus the `mods/fh2wheels` gamedb mod) |
 
 ## Layout
 
@@ -28,6 +31,7 @@ mods/<name>/
     <Archive>.zip/<entry>.set               "key value" lines patched into that ini entry (other keys untouched)
     stripped/gamedbRC.slt/<patch>.sql       a folder named like a .slt holds SQL patches, applied in name order
     <path>/<file>                           anything else is a loose file, copied as-is
+    <path>/<file>.set                       "key value" lines patched into the game's loose <file> (e.g. physics/PhysicsSettings.ini)
   imports.txt                             files to copy in: "<FH2 media path> <- <FM5 media path>", or "<- fh2:<path>" to take one from the base game (a .zip segment = entry inside it; missing zips are created)
 tools/
   build/
@@ -58,6 +62,11 @@ tools/
     CarSound.ps1                          shared by the two: folders, car list, writing a tuned bank and car-sound.json
   weather-menu/
     FH2WeatherMenu.cs, build.ps1          the time and weather menu and its build script
+  wheels/
+    fh2wheels.c, menu.c, wheels.c, ...    fh2wheels (the Azimuth DLL; build.ps1 builds it with Zig 0.13, Install.ps1 installs it)
+    make_gamedb.py                        writes mods/fh2wheels' SQL and strings.h (the menus' text)
+  re/
+    memfloat.py                           find / show / set floats in the running game (reverse engineering)
     FH2-Time-Weather-Menu-Guide.docx      its user guide
   bin/                                    downloaded sqlite3.exe (not committed)
 ```
@@ -78,7 +87,7 @@ Database mods are SQL patches, not modified copies of the database. Each build s
 - Mods apply in the order given; on conflicts the later mod wins. Output goes to `dist/`.
 - Mods with FM5 sources in `imports.txt` need the FM5 install: pass `-Fm5Media <FM5 Mount\media>` or set `FH2_FM5_MEDIA`.
 
-Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game version and that Extra Options 0.2.74+ is installed in Azimuth, turns on `[Files] EnableMediaOverrides=1` in `FH2_ExtraOptions.ini`, puts every file under `Mount\mediapc`, refuses to overwrite files that differ from the base unless `-Force`, and backs up what it replaces (`mod-backups\<name>-<time>`); the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
+Every release zip contains `install.json` (each file with its SHA-256 and the SHA-256 of the base file it replaces), `Install.ps1` and `Uninstall.ps1`. The installer checks the game version and that Extra Options is installed in Azimuth (`winmm.dll` beside `azimuth.exe`, or 0.2.74+ in `data\bin`), turns on `[Files] EnableMediaOverrides=1` in `FH2_ExtraOptions.ini`, puts every file under `Mount\mediapc`, refuses to overwrite files that differ from the base unless `-Force`, and backs up what it replaces (`mod-backups\<name>-<time>`); the uninstaller restores everything, refusing if files changed since (so with several mods installed, uninstall newest first).
 
 `Build-Mod.ps1 -Layer -Game <folder>` builds on top of what's installed in that game folder (`Mount\mediapc` first, then `Mount\media`: earlier car imports, a modded gamedb) instead of stock files, so mods stack. Such a release installs only onto exactly that state.
 
@@ -92,7 +101,7 @@ Earlier releases (importer 1.x, for Azimuth 0.9.7) patched `hash.manifest` and `
 
 ## Importing FM5 cars
 
-**Double-click `Import-Fm5Cars.cmd`** (or run `tools\fm5-import\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) a **sound donor** (any FH2 car whose engine sound to use), and the **Autoshow group** to list it in (Retro Muscle, Modern Muscle, Super GT, ... from a numbered list; Enter keeps the data donor's; the group also decides which wheel-shop category the car's wheel goes in). Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb), and cars the game already has aren't offered. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 on Azimuth 0.9.9 with Extra Options 0.2.74+, and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
+**Double-click `Import-Fm5Cars.cmd`** (or run `tools\fm5-import\Import-Fm5Cars.ps1` with no parameters) and it asks for everything: your Azimuth, FH2 and FM5 folders (remembered; the FH2 folder is read from Azimuth's settings when possible), then the FM5 cars to import - type part of a name and pick from the matches - and per car a **data donor** (an FH2 car of the same kind; a match is suggested) a **sound donor** (any FH2 car whose engine sound to use), and the **Autoshow group** to list it in (Retro Muscle, Modern Muscle, Super GT, ... from a numbered list; Enter keeps the data donor's; the group also decides which wheel-shop category the car's wheel goes in). Imports stack: each run adds its cars on top of whatever is installed (earlier imports, a modded gamedb), and cars the game already has aren't offered. This repo ships no game files: everything is read from your own installs. You need FH2 1.0.0.64 on Azimuth 0.9.10 with its Extra Options build (or 0.9.9 with Extra Options 0.2.74+), and FM5 1.0.0.20. `sqlite3.exe` is used from PATH or downloaded from sqlite.org (hash-checked) into `tools\bin`.
 
 ```powershell
 # which FM5 cars FH2 doesn't have
@@ -197,6 +206,22 @@ The menu never takes focus from the game (so FH2 doesn't pause): use the mouse; 
 | F6 already in use | Close the other menu or app using F6 |
 
 Ideas for later (not implemented or verified): car repair/clean/headlights, saved positions and teleport, traffic and grip/power testing controls, camera FOV/free camera/HUD, car and engine ID display for mod testing, and saved presets.
+
+## fh2wheels
+
+Wheel and suspension options in the garage, for every car (imported ones included):
+
+- **Front / Rear Wheel Offset** under Tires & Rims: Stock, -20 to +50 mm a side in 5 mm steps, then +75, +100 and +150 mm. Previewed live; the wheel camera, no performance graph.
+- **Front / Rear Tire Profile**: aspect ratio -20 to +35 points (a 255/40 with +10 becomes a 255/50 on the same rim).
+- **Rim sizes from 13" to 26"** for every car, front and rear, besides its own sizes (smaller ones lighter, larger ones heavier).
+- **Tuning**: ride height 10 cm lower and 15 cm higher on adjustable springs, camber -15 to 15 degrees.
+
+It has two halves:
+
+- **`fh2wheels.dll`** (`tools\wheels`): an Azimuth DLL in the `data\bin\azimuth-tls.dll` chain, like fh2net (it forwards to `fh2wheels-next.dll`, fh2net to `azimuth-tls-next.dll`, so they stack in either order). Build with `tools\wheels\build.ps1`, install with `tools\wheels\Install.ps1 -Azimuth <folder>` (`-Uninstall` removes it). The game has a fixed set of part slots, so the offsets and profiles borrow four that ordinary cars don't use (Restrictor Plate, Motor Parts, Quad Turbo, Motor) and the DLL keeps the game from treating them as engine parts; it applies the values when the car is built, adds the parts to the upgrade lists, sets the camera and supplies the menus' text. `fh2wheels.ini` `[offsets]` can add per-model offsets (`<Data_Car Id>=<front mm>,<rear mm>`); `[debug] SqlLog=` logs the game's SQL.
+- **`mods/fh2wheels`**: the gamedb rows (categories, option names, neutral part rows, rim sizes made in SQL from each car's stock rim, ride height ranges) and the camber range (`physics/PhysicsSettings.ini.set`). Regenerate the SQL with `py -3 tools\wheels\make_gamedb.py`; build on your game with `Build-Mod.ps1 -Mod fh2wheels -Game <folder> -Layer` and install as any mod.
+
+Both halves are needed: without the DLL the offset and profile parts do nothing and their text is blank.
 
 ## How FH2 loads media zips
 
