@@ -64,6 +64,5 @@ fh2wheels and fh2net both sit in the `azimuth-tls.dll` chain and work together, 
 ## Known limits
 
 - A rear rim shows only with an aftermarket front rim: with the stock rims, the car draws its own wheels on all four corners.
-- After a game restart, a car's rear rim is matched by its front rim. Two cars with the **same front rim but different rear rims** don't get their rear rims back after a restart (refit them in the garage). The same front rim with the same rear rim works fine.
 - The game doesn't draw rims larger than 24", so the sizes stop there. Cars that come with larger rims keep them.
 - Very wide tires and big offsets go through the bodywork; that's the point for some builds.
