@@ -19,7 +19,7 @@ The earlier dlc-unlock, stock-wheel-swap and photomode-unbound mods are retired:
 | [Car sound tuner](#car-sound-tuner) | Sliders for any car's sound: exhaust, engine and intake volume, idle, highs, lows and grit, the sub-bass layer, backfires, turbo, superchargers, blow-off valve (double-click `Tune-CarSound.cmd`). Release package: `tools\release\Make-SoundTunerRelease.ps1 -Version <x.y.z>`; user docs in `release/car-sound-tuner` |
 | [Turbo / supercharger volume](#turbo-and-supercharger-volume) | Makes any car's turbo, positive-displacement (DSC) or centrifugal (CSC) supercharger sound louder or quieter (double-click `Set-BoostVolume.cmd`) |
 | [Time and weather menu](#time-and-weather-menu) | Floating in-game menu to set the time of day, freeze the clock and change the weather (by thekkeith55) |
-| [fh2wheels](#fh2wheels) | Front/rear wheel offset and tire profile upgrades under Tires & Rims, rim sizes from 13" to 26" for every car, wider ride height and camber tuning (an Azimuth DLL plus the `mods/fh2wheels` gamedb mod) |
+| [fh2wheels](#fh2wheels) | Front/rear wheel offset and tire profile upgrades, a rear rim style, rim sizes from 13" to 24", tire widths from 185 to 395 mm and drag/rally tires for every car under Tires & Rims, wider ride height and camber tuning (an Azimuth DLL plus the `mods/fh2wheels` gamedb mod). Release package: `tools\release\Make-WheelsRelease.ps1 -Version <x.y.z>`; user docs in `release/fh2wheels` |
 
 ## Layout
 
@@ -44,6 +44,7 @@ tools/
     Make-ImporterRelease.ps1              packages the FM5 car importer
     Make-NetRelease.ps1                   packages fh2net and its server
     Make-SoundTunerRelease.ps1            packages the car sound tuner
+    Make-WheelsRelease.ps1                packages fh2wheels
   online/
     probe/                                fh2net (the Azimuth DLL; build.ps1 builds it with Zig 0.13)
     server/                               fh2srv.py, the game services + relay server
@@ -212,14 +213,16 @@ Ideas for later (not implemented or verified): car repair/clean/headlights, save
 Wheel and suspension options in the garage, for every car (imported ones included):
 
 - **Front / Rear Wheel Offset** under Tires & Rims: Stock, -20 to +50 mm a side in 5 mm steps, then +75, +100 and +150 mm. Previewed live; the wheel camera, no performance graph.
-- **Front / Rear Tire Profile**: aspect ratio -20 to +35 points (a 255/40 with +10 becomes a 255/50 on the same rim).
-- **Rim sizes from 13" to 26"** for every car, front and rear, besides its own sizes (smaller ones lighter, larger ones heavier).
-- **Tuning**: ride height 10 cm lower and 15 cm higher on adjustable springs, camber -15 to 15 degrees.
+- **Front / Rear Tire Profile**: aspect ratio -30 to +35 points (a 255/40 with +10 becomes a 255/50 on the same rim).
+- **Rear Rim Style**: a different rim on the rear axle, beside the game's Rim Style tile (which fits all four). Kept in the garage's unused `TireBrand` column; at start the DLL reads the rear rims back from the newest save revision, since the game doesn't (a car's rear rim is found by its front rim). Needs an aftermarket front rim.
+- **Rim sizes from 13" to 24"** (the most the game draws) and **tire widths from 185 to 395 mm** for every car, front and rear, besides its own (lighter or heavier as the game's own options).
+- **Drag and rally tires** for every car that doesn't have them.
+- **Tuning**: ride height 10 cm lower and 40 cm higher on adjustable springs, camber -15 to 15 degrees.
 
 It has two halves:
 
 - **`fh2wheels.dll`** (`tools\wheels`): an Azimuth DLL in the `data\bin\azimuth-tls.dll` chain, like fh2net (it forwards to `fh2wheels-next.dll`, fh2net to `azimuth-tls-next.dll`, so they stack in either order). Build with `tools\wheels\build.ps1`, install with `tools\wheels\Install.ps1 -Azimuth <folder>` (`-Uninstall` removes it). The game has a fixed set of part slots, so the offsets and profiles borrow four that ordinary cars don't use (Restrictor Plate, Motor Parts, Quad Turbo, Motor) and the DLL keeps the game from treating them as engine parts; it applies the values when the car is built, adds the parts to the upgrade lists, sets the camera and supplies the menus' text. `fh2wheels.ini` `[offsets]` can add per-model offsets (`<Data_Car Id>=<front mm>,<rear mm>`); `[debug] SqlLog=` logs the game's SQL.
-- **`mods/fh2wheels`**: the gamedb rows (categories, option names, neutral part rows, rim sizes made in SQL from each car's stock rim, ride height ranges) and the camber range (`physics/PhysicsSettings.ini.set`). Regenerate the SQL with `py -3 tools\wheels\make_gamedb.py`; build on your game with `Build-Mod.ps1 -Mod fh2wheels -Game <folder> -Layer` and install as any mod.
+- **`mods/fh2wheels`**: the gamedb rows (categories, option names, neutral part rows, rim sizes, tire widths and drag/rally tires made in SQL from each car's own rows, ride height ranges; safe to apply again on top, which only adds rows for cars that came since) and the camber range (`physics/PhysicsSettings.ini.set`). Regenerate the SQL with `py -3 tools\wheels\make_gamedb.py`; build on your game with `Build-Mod.ps1 -Mod fh2wheels -Game <folder> -Layer` and install as any mod.
 
 Both halves are needed: without the DLL the offset and profile parts do nothing and their text is blank.
 

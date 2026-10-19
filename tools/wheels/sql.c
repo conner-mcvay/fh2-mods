@@ -23,6 +23,7 @@ static int contains(const char *s, int n, const char *needle) {
 }
 
 #include "menu.c"
+static char *rims_sql(const char *s, int n);   // rims.c: the wheel shop's queries
 
 // SqlLog=a|b|c: any of them.
 static int sql_logged(const char *s, int n) {
@@ -40,7 +41,8 @@ static int sql_logged(const char *s, int n) {
 void __attribute__((used)) sql_on_prepare(const char **psql, int *pn) {
   const char *s = *psql;
   if (!s) return;
-  char *r = menu_rewrite(s, *pn);
+  char *r = rims_sql(s, *pn);
+  if (!r) r = menu_rewrite(s, *pn);
   if (r) { *psql = r; *pn = -1; s = r; }
   if (g_sqlLog[0] && sql_logged(s, *pn)) log_long(r ? "sql (rewritten)" : "sql", s, *pn);
 }

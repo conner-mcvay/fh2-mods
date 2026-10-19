@@ -9,6 +9,7 @@
 #include <wchar.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define GAME_BASE ((BYTE *)0x140000000ULL)
 
@@ -17,6 +18,7 @@ static HANDLE g_log = INVALID_HANDLE_VALUE;
 static LARGE_INTEGER g_freq, g_t0;
 static wchar_t g_ini[MAX_PATH];
 static char g_iniA[MAX_PATH];
+static wchar_t g_dllDir[MAX_PATH];   // this DLL's folder (data\bin), with a trailing backslash
 
 static void logf(const char *fmt, ...) {
   char buf[1024];
@@ -84,15 +86,19 @@ static int hook_jmp(BYTE *at, const BYTE *orig, SIZE_T n, void *stub, const char
 #include "sql.c"
 #include "wheels.c"
 #include "text.c"
+#include "gamedb.c"
+#include "rims.c"
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   (void)r;
   if (reason != DLL_PROCESS_ATTACH) return TRUE;
   DisableThreadLibraryCalls(inst);
   InitializeCriticalSection(&g_logLock);
+  InitializeCriticalSection(&g_rimLock);
   QueryPerformanceFrequency(&g_freq); QueryPerformanceCounter(&g_t0);
   wchar_t path[MAX_PATH]; GetModuleFileNameW(inst, path, MAX_PATH);
   wchar_t *slash = wcsrchr(path, L'\\'); if (slash) slash[1] = 0;
+  wcscpy(g_dllDir, path);
   wchar_t logp[MAX_PATH], next[MAX_PATH];
   _snwprintf(logp, MAX_PATH, L"%lsfh2wheels.log", path);
   _snwprintf(next, MAX_PATH, L"%lsfh2wheels-next.dll", path);
@@ -107,5 +113,6 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   CloseHandle(CreateThread(NULL, 0, wheels_install, NULL, 0, NULL));
   sql_start();
   CloseHandle(CreateThread(NULL, 0, text_install, NULL, 0, NULL));
+  CloseHandle(CreateThread(NULL, 0, rims_install, NULL, 0, NULL));
   return TRUE;
 }

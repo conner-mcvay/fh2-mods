@@ -61,14 +61,18 @@ static const wchar_t *const g_strings0[] = {
   L"Front Tire Profile",
   L"Taller or shorter front tire sidewalls on the same rims: changes the tire aspect ratio.",
   L"The tire profile that comes with the fitted width and rim size.",
+  L"Aspect -30",
+  L"Aspect ratio 30 points lower (a 255/40 becomes a 255/10): shorter sidewalls and tires on the same rim.",
+  L"Aspect -25",
+  L"Aspect ratio 25 points lower (a 255/40 becomes a 255/15): shorter sidewalls and tires on the same rim.",
   L"Aspect -20",
   L"Aspect ratio 20 points lower (a 255/40 becomes a 255/20): shorter sidewalls and tires on the same rim.",
+};
+static const wchar_t *const g_strings1[] = {
   L"Aspect -15",
   L"Aspect ratio 15 points lower (a 255/40 becomes a 255/25): shorter sidewalls and tires on the same rim.",
   L"Aspect -10",
   L"Aspect ratio 10 points lower (a 255/40 becomes a 255/30): shorter sidewalls and tires on the same rim.",
-};
-static const wchar_t *const g_strings1[] = {
   L"Aspect -5",
   L"Aspect ratio 5 points lower (a 255/40 becomes a 255/35): shorter sidewalls and tires on the same rim.",
   L"Aspect +5",
@@ -87,12 +91,18 @@ static const wchar_t *const g_strings1[] = {
   L"Aspect ratio 35 points higher (a 255/40 becomes a 255/75): taller sidewalls and tires on the same rim.",
   L"Rear Tire Profile",
   L"Taller or shorter rear tire sidewalls on the same rims: changes the tire aspect ratio.",
+  L"Rear Rim Style",
+  L"Rims for the rear axle only: the front keeps its own (it needs an aftermarket front rim). Stock puts the front rims back on the rear.",
   L"Smaller Front Rim Size",
   L"Install smaller-diameter front rims with taller-profile tires of the same overall size, for more sidewall and a softer edge.",
   L"Smaller Rear Rim Size",
   L"Install smaller-diameter rear rims with taller-profile tires of the same overall size, for more sidewall and a softer edge.",
+  L"Narrower Front Tire Width",
+  L"Install narrower front tires: less grip, but less weight and drag.",
+  L"Narrower Rear Tire Width",
+  L"Install narrower rear tires: less grip, but less weight and drag.",
 };
 static const struct { unsigned base, count; const wchar_t *const *text; } g_stringRanges[] = {
   { 59750, 67, g_strings0 },
-  { 3212, 22, g_strings1 },
+  { 3212, 32, g_strings1 },
 };

@@ -25,7 +25,7 @@ typedef struct {
 } Kind;
 
 static const int g_offsetMm[] = { 0, -20, -15, -10, -5, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100, 150 };   // mm a side
-static const int g_profileDelta[] = { 0, -20, -15, -10, -5, 5, 10, 15, 20, 25, 30, 35 };            // aspect points
+static const int g_profileDelta[] = { 0, -30, -25, -20, -15, -10, -5, 5, 10, 15, 20, 25, 30, 35 };   // aspect points
 #define COUNT(a) ((int)(sizeof a / sizeof *a))
 
 enum { FRONT_OFFSET, REAR_OFFSET, FRONT_PROFILE, REAR_PROFILE, KINDS };
@@ -80,11 +80,12 @@ static char *menu_rewrite(const char *s, int n) {
   if (n < 0) n = (int)strlen(s);
   if (n > 40 && !memcmp(s, "CREATE VIEW ", 12) && contains(s, n, "View_UpgradeParts AS SELECT")) return menu_parts_view(s, n);
   if (contains(s, n, "AS FrontRearIndicator FROM") && contains(s, n, "AreaId = 4")) {
+    // (and the Rear Rim Style tile, rims.c's REAR_TYPE)
     char *a = replace_once(s, n, "WHEN PartEnum = 6 OR PartEnum = 38 OR PartEnum = 10",
                            "WHEN PartEnum = 6 OR PartEnum = 38 OR PartEnum = 10 OR PartEnum = 22 OR PartEnum = 26");
     if (!a) return NULL;
     char *b = replace_once(a, (int)strlen(a), "WHEN PartEnum = 7 OR PartEnum = 39 OR PartEnum = 11",
-                           "WHEN PartEnum = 7 OR PartEnum = 39 OR PartEnum = 11 OR PartEnum = 42 OR PartEnum = 3");
+                           "WHEN PartEnum = 7 OR PartEnum = 39 OR PartEnum = 11 OR PartEnum = 42 OR PartEnum = 3 OR id = 64");
     if (b) { free(a); return b; }
     return a;
   }
