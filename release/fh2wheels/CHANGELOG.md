@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1 (2026-10-20)
+
+- The installer asks for the **Azimuth folder and the game folder separately** instead of reading the game folder from Azimuth's settings without asking, which installed into the wrong game for some setups. A folder that isn't right is asked for again. For the game folder it shows the one Azimuth runs (Enter takes it), warns before using a different one, and shows both folders for a yes/no before changing anything.
+- The README explains that with several Azimuth folders, fh2wheels goes into the one the game is started from.
+
 ## 1.0.0 (2026-10-18)
 
 First release, for Forza Horizon 2 1.0.0.64 on Azimuth 0.9.10 with Extra Options.

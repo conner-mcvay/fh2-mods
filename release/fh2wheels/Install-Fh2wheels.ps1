@@ -11,9 +11,12 @@
   mod went in after it (so it can't come out without undoing that one), the new one goes on top instead, which
   adds the options for cars that came since. sqlite3.exe is downloaded from sqlite.org (hash-checked) when it isn't
   on PATH or in tools\bin.
-  The game folder (the one with Mount) is read from Azimuth's data\azimuth.ini when not given.
+  Without -AzimuthRoot / -GameRoot it asks for each folder separately, asking again until it's right; for the game
+  folder it shows the one Azimuth is set to run (data\azimuth.ini), which Enter takes. A game folder other than
+  that one is only used after a warning (the game wouldn't see the mod there), and the two are confirmed before
+  anything changes.
 .EXAMPLE
-  .\Install-Fh2wheels.ps1 -AzimuthRoot C:\Games\azimuth
+  .\Install-Fh2wheels.ps1 -AzimuthRoot C:\Games\azimuth -GameRoot C:\Games\Anthem_1.0.0.64_x64__8wekyb3d8bbwe
 .EXAMPLE
   .\Install-Fh2wheels.ps1 -AzimuthRoot C:\Games\azimuth -Uninstall
 #>
@@ -22,24 +25,56 @@ $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
 
-if (-not $AzimuthRoot) { $AzimuthRoot = Read-Host 'Azimuth folder (the one with azimuth.exe)' }
-$AzimuthRoot = $AzimuthRoot.Trim('"').TrimEnd('\')
-if (-not (Test-Path -LiteralPath (Join-Path $AzimuthRoot 'azimuth.exe'))) { throw "No azimuth.exe in $AzimuthRoot" }
-if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($AzimuthRoot + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Close Azimuth first.' }
-if (-not $GameRoot) {   # [title-1a96545b] folder= in data\azimuth.ini (UTF-16)
-  $ini = Join-Path $AzimuthRoot 'data\azimuth.ini'
-  if (Test-Path -LiteralPath $ini) {
-    $section = ''
-    foreach ($line in Get-Content -LiteralPath $ini) {
-      if ($line -match '^\s*\[(.+)\]') { $section = $Matches[1] }
-      elseif ($section -eq 'title-1a96545b' -and $line -match '^\s*folder\s*=\s*(.+?)\s*$') { $GameRoot = $Matches[1] }
-    }
+function Clean([string]$p) { if ($p) { $p.Trim().Trim('"').TrimEnd('\') } else { '' } }
+function Has([string]$dir, [string]$file) { try { $dir -and (Test-Path -LiteralPath (Join-Path $dir $file) -PathType Leaf) } catch { $false } }
+$isAzimuth = { param($p) Has $p 'azimuth.exe' }
+$isGame = { param($p) Has $p 'Mount\forza_durango_release_final.exe' }
+# asks until the answer passes $test; Enter takes $default when there is one
+function Ask([string]$prompt, [string]$default, [scriptblock]$test, [string]$bad) {
+  while ($true) {
+    $q = if ($default) { "$prompt`n  [Enter for $default]" } else { $prompt }
+    $a = Clean (Read-Host $q)
+    if (-not $a) { $a = $default }
+    if (& $test $a) { return $a }
+    Write-Host "  $bad" -ForegroundColor Yellow
   }
-  if (-not $GameRoot) { $GameRoot = Read-Host 'Game folder (the one with Mount)' }
 }
-$GameRoot = $GameRoot.Trim('"').TrimEnd('\')
-if (-not (Test-Path -LiteralPath (Join-Path $GameRoot 'Mount\forza_durango_release_final.exe'))) { throw "No Mount\forza_durango_release_final.exe in $GameRoot" }
-Write-Host "Azimuth: $AzimuthRoot`nGame:    $GameRoot"
+$asked = $false
+
+# --- the Azimuth folder ---
+$AzimuthRoot = Clean $AzimuthRoot
+if (-not $AzimuthRoot) {
+  $AzimuthRoot = Ask 'Azimuth folder (the one with azimuth.exe)' '' $isAzimuth 'No azimuth.exe there; enter the folder azimuth.exe is in.'
+  $asked = $true
+} elseif (-not (& $isAzimuth $AzimuthRoot)) { throw "No azimuth.exe in $AzimuthRoot" }
+if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($AzimuthRoot + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Close Azimuth first.' }
+
+# --- the game folder: asked separately; the one this Azimuth runs ([title-1a96545b] folder= in data\azimuth.ini) is shown ---
+$azGame = ''
+$ini = Join-Path $AzimuthRoot 'data\azimuth.ini'
+if (Test-Path -LiteralPath $ini) {
+  $section = ''
+  foreach ($line in Get-Content -LiteralPath $ini) {
+    if ($line -match '^\s*\[(.+)\]') { $section = $Matches[1] }
+    elseif ($section -eq 'title-1a96545b' -and $line -match '^\s*folder\s*=\s*(.+?)\s*$') { $azGame = Clean $Matches[1] }
+  }
+}
+$GameRoot = Clean $GameRoot
+if (-not $GameRoot) {
+  if ($azGame) { Write-Host "This Azimuth is set to run the game in: $azGame" }
+  $GameRoot = Ask 'Game folder (the one with the Mount folder in it)' $(if (& $isGame $azGame) { $azGame } else { '' }) $isGame 'No Mount\forza_durango_release_final.exe there; enter the folder that contains Mount.'
+  $asked = $true
+} elseif (-not (& $isGame $GameRoot)) { throw "No Mount\forza_durango_release_final.exe in $GameRoot" }
+
+# the game only sees the mod, and fh2wheels.dll only finds the rims, in the folder Azimuth runs
+if (-not $azGame -or -not $GameRoot.Equals($azGame, [StringComparison]::OrdinalIgnoreCase)) {
+  $runs = if ($azGame) { $azGame } else { '(not set)' }
+  Write-Warning ("This Azimuth runs the game in '$runs', not '$GameRoot'. The game won't see fh2wheels' database part there, " +
+    "and rear rims won't work. Pick that game folder in Azimuth first, or enter the folder it runs.")
+  if ($asked -and (Read-Host 'Install there anyway? (y/N)') -notmatch '^y') { throw 'Stopped; nothing was changed.' }
+}
+Write-Host "`nAzimuth: $AzimuthRoot`nGame:    $GameRoot"
+if ($asked -and (Read-Host "$(if ($Uninstall) { 'Uninstall' } else { 'Install' }) fh2wheels here? (Y/n)") -match '^n') { throw 'Stopped; nothing was changed.' }
 
 # the database parts installed earlier, newest first, not yet uninstalled
 $backups = @(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'mod-backups') -Directory -Filter 'fh2wheels-*' -ErrorAction SilentlyContinue |

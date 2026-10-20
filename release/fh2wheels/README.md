@@ -33,7 +33,13 @@ The offset and profile categories use the wheel camera, so the car stays in view
 
 1. **Close the game.**
 2. Extract this zip anywhere and keep the folders together.
-3. Double-click **`Install-Fh2wheels.cmd`** and enter your **Azimuth folder** (the one with `azimuth.exe`). The game folder is read from Azimuth's settings.
+3. Double-click **`Install-Fh2wheels.cmd`**. It asks for two folders, one after the other:
+   - your **Azimuth folder** (the one with `azimuth.exe`);
+   - your **game folder** (the one with the `Mount` folder in it, e.g. `Anthem_1.0.0.64_x64__8wekyb3d8bbwe`). It shows the game folder that Azimuth is set to run; press Enter to use it.
+
+   A wrong folder is asked for again. If the game folder isn't the one Azimuth runs, you get a warning first: install into the folder Azimuth runs, or the game won't see the mod. It shows both folders and asks before changing anything.
+
+   If you have **more than one Azimuth folder**, install fh2wheels into the one you start the game from: each Azimuth folder has its own copy of `fh2wheels.dll`.
 4. Start the game; the new options are in Upgrades > Tires & Rims.
 
 **Imported cars** (e.g. with the FM5 car importer): the rim sizes, tire widths and drag/rally tires are made from each car's own options when you install. For cars you import later, run `Install-Fh2wheels.cmd` again afterwards. Wheel offsets, tire profiles and rear rims work on every car either way.
