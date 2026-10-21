@@ -114,6 +114,10 @@ if (Test-Path -LiteralPath $ini) {
     elseif ($section -eq 'title-1a96545b' -and $line -match '^\s*folder\s*=\s*(.+?)\s*$') { $azGame = Clean $Matches[1] }
   }
 }
+# Azimuth can keep it relative to its own folder, e.g. "(Forza Horizon 2) Anthem_1.0.0.64_x64__8wekyb3d8bbwe\Anthem_..."
+if ($azGame -and -not [IO.Path]::IsPathRooted($azGame)) {
+  try { $azGame = [IO.Path]::GetFullPath((Join-Path $AzimuthRoot $azGame)).TrimEnd('\') } catch { }
+}
 $GameRoot = Clean $GameRoot
 if (-not $GameRoot) {
   if ($azGame) { Write-Host "This Azimuth is set to run the game in: $azGame" }
@@ -121,6 +125,7 @@ if (-not $GameRoot) {
   $asked = $true
 } elseif (-not (& $isGame $GameRoot)) { throw "No Mount\forza_durango_release_final.exe in $GameRoot" }
 
+try { $GameRoot = [IO.Path]::GetFullPath($GameRoot).TrimEnd('\'); $AzimuthRoot = [IO.Path]::GetFullPath($AzimuthRoot).TrimEnd('\') } catch { }
 # the game only sees the mod, and fh2wheels.dll only finds the rims, in the folder Azimuth runs
 if (-not $azGame -or -not $GameRoot.Equals($azGame, [StringComparison]::OrdinalIgnoreCase)) {
   $runs = if ($azGame) { $azGame } else { '(not set)' }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3 (2026-10-20)
+
+- The installer understands a game folder that Azimuth keeps **relative to its own folder** (e.g. `(Forza Horizon 2) Anthem_1.0.0.64_x64__8wekyb3d8bbwe\Anthem_1.0.0.64_x64__8wekyb3d8bbwe`). It used to offer no default for those setups and warned that the right game folder wasn't the one Azimuth runs.
+
 ## 1.0.2 (2026-10-20)
 
 - The installer writes **`fh2wheels-install.log`** (next to it, or in `%TEMP%`): everything it showed, any error with where it happened, and a report of the setup before and after (folders, Azimuth and Extra Options versions and settings, the `data\bin` DLL chain, whether the game folder has fh2wheels' database part, and a summary of `data\bin\fh2wheels.log` with any patch that failed).
