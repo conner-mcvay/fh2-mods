@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4 (2026-10-20)
+
+- `fh2wheels.log` says whether the game database fh2wheels reads at start has fh2wheels' part in it (`game database: fh2wheels part present`, or a `PROBLEM:` line naming the database and the game folder to install into), with that database's full path. A game folder Azimuth keeps relative to its own folder is resolved against the Azimuth folder.
+- `fh2wheels-install.log` keeps every run (newest last); before, an uninstall run wiped the log of the install before it.
+
 ## 1.0.3 (2026-10-20)
 
 - The installer understands a game folder that Azimuth keeps **relative to its own folder** (e.g. `(Forza Horizon 2) Anthem_1.0.0.64_x64__8wekyb3d8bbwe\Anthem_1.0.0.64_x64__8wekyb3d8bbwe`). It used to offer no default for those setups and warned that the right game folder wasn't the one Azimuth runs.

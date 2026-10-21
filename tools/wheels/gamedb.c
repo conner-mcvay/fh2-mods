@@ -135,17 +135,26 @@ static void rims_read_gamedb(const wchar_t *dllDir) {
   _snwprintf(ini, MAX_PATH, L"%ls..\\azimuth.ini", dllDir);
   GetPrivateProfileStringW(L"title-1a96545b", L"folder", L"", game, MAX_PATH, ini);
   if (!game[0]) { logf("rims: no game folder in %ls", ini); return; }
+  wchar_t rel[MAX_PATH];   // Azimuth can keep it relative to its own folder (data\bin\..\..)
+  if (!(game[0] == L'\\' || (game[0] && game[1] == L':'))) { wcscpy(rel, game); _snwprintf(game, MAX_PATH, L"%ls..\\..\\%ls", dllDir, rel); }
+  if (GetFullPathNameW(game, MAX_PATH, rel, NULL)) wcscpy(game, rel);
   _snwprintf(db, MAX_PATH, L"%ls\\Mount\\mediapc\\stripped\\gamedbRC.slt", game);
-  if (GetFileAttributesW(db) == INVALID_FILE_ATTRIBUTES) _snwprintf(db, MAX_PATH, L"%ls\\Mount\\media\\stripped\\gamedbRC.slt", game);
+  int mediapc = GetFileAttributesW(db) != INVALID_FILE_ATTRIBUTES;
+  if (!mediapc) _snwprintf(db, MAX_PATH, L"%ls\\Mount\\media\\stripped\\gamedbRC.slt", game);
   SqliteFile f; BYTE *data = sqlite_open(db, 0, &f);
   if (!data) return;
-  SqliteFind q = { "List_Wheels", 0, "" };
+  SqliteFind q = { "List_Wheels", 0, "" }, mark = { "Fh2wheels", 0, "" };
   sqlite_rows(&f, 1, sqlite_find_row, &q, 0);
+  sqlite_rows(&f, 1, sqlite_find_row, &mark, 0);   // the table make_gamedb.py's SQL ends with
   RimScan s = { sqlite_column_index(q.sql, "ID"), sqlite_column_index(q.sql, "MediaName"), 0 };
   if (q.root && s.idCol >= 0 && s.nameCol >= 0) sqlite_rows(&f, q.root, rim_row, &s, 0);
   free(data);
   if (g_rimCount) qsort(g_rims, g_rimCount, sizeof *g_rims, rim_cmp);
   logf("rims: %d rims read from %ls", g_rimCount, db);
+  if (!mark.root)
+    logf("PROBLEM: that game database has no fh2wheels part (%ls): run Install-Fh2wheels.cmd for the game folder %ls",
+         mediapc ? L"another mod's, in Mount\\mediapc" : L"the game's own; nothing in Mount\\mediapc", game);
+  else logf("game database: fh2wheels part present");
 }
 
 // The garage's rim pairs (WheelStyle, TireBrand) in the newest save revision (data\titles\1A96545B\saves\<player>\<user>

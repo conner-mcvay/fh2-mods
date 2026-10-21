@@ -33,8 +33,8 @@ $azGame = ''
 # Everything shown goes to fh2wheels-install.log beside this script (or in %TEMP% when this folder isn't writable),
 # with a report of the setup before and after, so a failed install can be sent along as one file.
 $log = Join-Path $here 'fh2wheels-install.log'
-try { [IO.File]::WriteAllText($log, '') } catch { $log = Join-Path $env:TEMP 'fh2wheels-install.log' }
-try { Start-Transcript -LiteralPath $log -Force | Out-Null } catch { $log = $null }
+try { [IO.File]::AppendAllText($log, '') } catch { $log = Join-Path $env:TEMP 'fh2wheels-install.log' }
+try { Start-Transcript -LiteralPath $log -Append -Force | Out-Null } catch { $log = $null }   # every run kept, newest last
 $version = if (Test-Path -LiteralPath (Join-Path $here 'VERSION.txt')) { (Get-Content -LiteralPath (Join-Path $here 'VERSION.txt') -TotalCount 1) } else { 'fh2wheels (version unknown)' }
 Write-Host "$version installer, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); Windows $([Environment]::OSVersion.Version), PowerShell $($PSVersionTable.PSVersion)"
 Write-Host "Running from: $here"
@@ -57,7 +57,8 @@ function Show-State([string]$when) {
         $lines = @(Get-Content -LiteralPath $rt | Where-Object { $_ -notmatch '^(sql|,|\[|\))' })
         $lines | Select-Object -First 4 | ForEach-Object { Write-Host "    $_" }
         Write-Host "    ... $(@($lines -match 'applied at').Count) patches applied"
-        $lines -match 'not applied|not found|can''t|isn''t|not where expected|no game folder|no save' | Select-Object -First 10 | ForEach-Object { Write-Host "    PROBLEM: $_" }
+        $lines -match 'game database'| Select-Object -First 1 | ForEach-Object { Write-Host "    $_" }
+        $lines -match 'not applied|not found|can''t|isn''t|not where expected|no game folder|no save|PROBLEM' | Select-Object -First 10 | ForEach-Object { Write-Host "    PROBLEM: $($_ -replace 'PROBLEM: ', '')" }
       } else { Write-Host '  data\bin\fh2wheels.log: none (fh2wheels has not run from this Azimuth folder)' }
     }
     if ($GameRoot -and (& $isGame $GameRoot)) {
