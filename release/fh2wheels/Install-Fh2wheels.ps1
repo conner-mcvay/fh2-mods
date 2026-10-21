@@ -52,7 +52,8 @@ function Show-State([string]$when) {
       $eo = Join-Path $AzimuthRoot 'winmm.dll'; $eoIni = Join-Path $AzimuthRoot 'FH2_ExtraOptions.ini'
       $overrides = (Test-Path -LiteralPath $eoIni) -and [regex]::IsMatch([IO.File]::ReadAllText($eoIni), '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$')
       Write-Host "  winmm.dll: $(& $dllName $eo); FH2_ExtraOptions.ini EnableMediaOverrides=1: $overrides"
-      foreach ($f in 'azimuth-tls.dll', 'azimuth-tls-next.dll', 'fh2wheels-next.dll') { Write-Host ("  data\bin\{0}: {1}" -f $f, (& $dllName (Join-Path $AzimuthRoot "data\bin\$f"))) }
+      $chain = foreach ($f in 'azimuth-tls.dll', 'azimuth-tls-next.dll', 'fh2wheels-next.dll') { $n = & $dllName (Join-Path $AzimuthRoot "data\bin\$f"); Write-Host ("  data\bin\{0}: {1}" -f $f, $n); $n }
+      if ($chain[0] -ne 'fh2wheels' -and $chain[1] -ne 'fh2wheels') { Write-Host '  PROBLEM: fh2wheels.dll is not in the azimuth-tls.dll chain, so the game does not load it' }
       $rt = Join-Path $AzimuthRoot 'data\bin\fh2wheels.log'
       if (Test-Path -LiteralPath $rt) {
         Write-Host "  data\bin\fh2wheels.log ($((Get-Item -LiteralPath $rt).LastWriteTime)):"

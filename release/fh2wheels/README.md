@@ -71,6 +71,7 @@ When reporting a problem, send both, and say which folder you start the game fro
 | No new options in Tires & Rims, not even the new rim sizes or tire widths | The game isn't reading the database fh2wheels installed. Most often another mod has its own game database in `Mount\mediaoverride`, which the game reads first: install again and answer **Y** to installing into `Mount\mediaoverride`. Otherwise the game was started from a different Azimuth folder, or runs a different game folder than the one installed to. The install log's report shows which database the game reads and whether it has fh2wheels; `fh2wheels.log` says so too (`PROBLEM:` line). |
 | Upgrading or uninstalling the other mod in `Mount\mediaoverride` | Uninstall fh2wheels first, then update that mod, then install fh2wheels again. Otherwise one would undo the other's database changes. |
 | Options there, but blank text, or the rear rim changes all four wheels | The database part is installed but `fh2wheels.dll` isn't running: no fresh `fh2wheels.log`. Usually the game was started from another Azimuth folder with an older copy (each Azimuth folder has its own). |
+| Everything stopped working after updating or reinstalling Azimuth | Azimuth put its own `azimuth-tls.dll` back, which takes fh2wheels out. Run `Install-Fh2wheels.cmd` again (1.1.1 or later). |
 | "Close Azimuth first" | The game is still running; close it (check Task Manager for azimuth.exe). |
 | "Needs FH2 Extra Options" | Install Extra Options for Azimuth 0.9.10 (`winmm.dll` beside `azimuth.exe`) first. |
 

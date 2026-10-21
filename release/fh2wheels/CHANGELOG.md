@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 (2026-10-21)
+
+- Fixed the installer failing with "Cannot bind argument to parameter 'Path' because it is null" after **Azimuth was updated or reinstalled**. That puts Azimuth's own `azimuth-tls.dll` back, which drops fh2wheels out of the DLL chain and leaves an old `fh2wheels-next.dll` behind. The installer now replaces that leftover with the current DLL and puts fh2wheels back in (behind fh2net when it's there). Uninstall in that state removes the leftover.
+- The install log's report says when fh2wheels isn't in the DLL chain.
+
 ## 1.1.0 (2026-10-20)
 
 - **Works alongside mods in `Mount\mediaoverride`** (such as backports of newer Forza titles), which the game reads before `Mount\mediapc`. When another mod has its own game database or physics settings there, the installer offers to install into `Mount\mediaoverride` (the default then), built on top of that mod's files so its changes stay, with them backed up for uninstalling. `-MediaFolder mediapc|mediaoverride` picks it from the command line.

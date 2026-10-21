@@ -20,7 +20,12 @@ if ($Uninstall) {
   if (-not (Test-Path $next)) { throw 'Not installed (no fh2wheels-next.dll).' }
   # fh2wheels is azimuth-tls.dll, or azimuth-tls-next.dll when fh2net went in front of it later
   $at = @($cur, (Join-Path $bin 'azimuth-tls-next.dll')) | Where-Object { & $isOurs $_ } | Select-Object -First 1
-  if (-not $at) { throw 'fh2wheels-next.dll exists but fh2wheels.dll was not found in the chain; left alone.' }
+  if (-not $at -and (Test-Path $cur)) {   # the chain was replaced since (see below): only the old fh2wheels-next.dll is left
+    Remove-Item $next
+    Write-Host 'fh2wheels was already out of the azimuth-tls.dll chain (Azimuth updated or reinstalled?); removed its leftover fh2wheels-next.dll.'
+    return
+  }
+  if (-not $at) { throw 'fh2wheels-next.dll exists but neither fh2wheels nor azimuth-tls.dll is in data\bin; left alone.' }
   Remove-Item $at; Rename-Item $next (Split-Path $at -Leaf)
   Write-Host "fh2wheels removed; $(Split-Path $at -Leaf) restored."
   return
@@ -28,11 +33,18 @@ if ($Uninstall) {
 if (-not (Test-Path $ours)) { throw "Build first: $ours" }
 $netNext = Join-Path $bin 'azimuth-tls-next.dll'
 $at = @($cur, $netNext) | Where-Object { & $isOurs $_ } | Select-Object -First 1
+if (-not $at -and (Test-Path $next)) {
+  # fh2wheels-next.dll left from an earlier install, but fh2wheels is no longer in the chain: azimuth-tls.dll was
+  # replaced since (an Azimuth update or reinstall puts its own back). The one there now is current; the old one goes.
+  Write-Host "fh2wheels was no longer in the azimuth-tls.dll chain (Azimuth updated or reinstalled?); putting it back."
+  Remove-Item $next
+}
 if (-not (Test-Path $next)) {
   if ($at) { throw "$(Split-Path $at -Leaf) is fh2wheels but fh2wheels-next.dll is missing." }
   # behind fh2net when it is there (azimuth-tls.dll), so fh2net's own installer still finds itself in front
   $isNet = (Test-Path $cur) -and [IO.File]::ReadAllText($cur, [Text.Encoding]::ASCII).Contains('fh2net probe loaded')
   $at = if ($isNet -and (Test-Path $netNext)) { $netNext } else { $cur }
+  if (-not (Test-Path $at)) { throw "No $(Split-Path $at -Leaf) in $bin to put fh2wheels in front of; reinstall Azimuth (and Extra Options) first." }
   Rename-Item $at 'fh2wheels-next.dll'
 }
 Copy-Item $ours $at -Force
