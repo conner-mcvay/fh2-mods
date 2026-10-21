@@ -24,11 +24,66 @@ param([string]$AzimuthRoot, [string]$GameRoot, [string]$Sqlite = $env:FH2_SQLITE
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
-
 function Clean([string]$p) { if ($p) { $p.Trim().Trim('"').TrimEnd('\') } else { '' } }
 function Has([string]$dir, [string]$file) { try { $dir -and (Test-Path -LiteralPath (Join-Path $dir $file) -PathType Leaf) } catch { $false } }
 $isAzimuth = { param($p) Has $p 'azimuth.exe' }
 $isGame = { param($p) Has $p 'Mount\forza_durango_release_final.exe' }
+$azGame = ''
+
+# Everything shown goes to fh2wheels-install.log beside this script (or in %TEMP% when this folder isn't writable),
+# with a report of the setup before and after, so a failed install can be sent along as one file.
+$log = Join-Path $here 'fh2wheels-install.log'
+try { [IO.File]::WriteAllText($log, '') } catch { $log = Join-Path $env:TEMP 'fh2wheels-install.log' }
+try { Start-Transcript -LiteralPath $log -Force | Out-Null } catch { $log = $null }
+$version = if (Test-Path -LiteralPath (Join-Path $here 'VERSION.txt')) { (Get-Content -LiteralPath (Join-Path $here 'VERSION.txt') -TotalCount 1) } else { 'fh2wheels (version unknown)' }
+Write-Host "$version installer, $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss'); Windows $([Environment]::OSVersion.Version), PowerShell $($PSVersionTable.PSVersion)"
+Write-Host "Running from: $here"
+function Show-State([string]$when) {
+  Write-Host "`n--- setup $when ---"
+  try {
+    $dllName = { param($p) if (-not (Test-Path -LiteralPath $p)) { return '-' }
+      $x = [IO.File]::ReadAllText($p, [Text.Encoding]::ASCII)
+      if ($x.Contains('fh2wheels loaded')) { 'fh2wheels' } elseif ($x.Contains('fh2net probe loaded')) { 'fh2net' } elseif ($x.Contains('game:\mediapc\')) { 'Extra Options' } else { "other ($((Get-Item -LiteralPath $p).Length) bytes)" } }
+    if ($AzimuthRoot -and (& $isAzimuth $AzimuthRoot)) {
+      Write-Host "Azimuth: $AzimuthRoot (azimuth.exe $((Get-Item -LiteralPath (Join-Path $AzimuthRoot 'azimuth.exe')).VersionInfo.FileVersion))"
+      Write-Host "  runs the game in: $(if ($azGame) { $azGame } else { '(not set in data\azimuth.ini)' })"
+      $eo = Join-Path $AzimuthRoot 'winmm.dll'; $eoIni = Join-Path $AzimuthRoot 'FH2_ExtraOptions.ini'
+      $overrides = (Test-Path -LiteralPath $eoIni) -and [regex]::IsMatch([IO.File]::ReadAllText($eoIni), '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$')
+      Write-Host "  winmm.dll: $(& $dllName $eo); FH2_ExtraOptions.ini EnableMediaOverrides=1: $overrides"
+      foreach ($f in 'azimuth-tls.dll', 'azimuth-tls-next.dll', 'fh2wheels-next.dll') { Write-Host ("  data\bin\{0}: {1}" -f $f, (& $dllName (Join-Path $AzimuthRoot "data\bin\$f"))) }
+      $rt = Join-Path $AzimuthRoot 'data\bin\fh2wheels.log'
+      if (Test-Path -LiteralPath $rt) {
+        Write-Host "  data\bin\fh2wheels.log ($((Get-Item -LiteralPath $rt).LastWriteTime)):"
+        $lines = @(Get-Content -LiteralPath $rt | Where-Object { $_ -notmatch '^(sql|,|\[|\))' })
+        $lines | Select-Object -First 4 | ForEach-Object { Write-Host "    $_" }
+        Write-Host "    ... $(@($lines -match 'applied at').Count) patches applied"
+        $lines -match 'not applied|not found|can''t|isn''t|not where expected|no game folder|no save' | Select-Object -First 10 | ForEach-Object { Write-Host "    PROBLEM: $_" }
+      } else { Write-Host '  data\bin\fh2wheels.log: none (fh2wheels has not run from this Azimuth folder)' }
+    }
+    if ($GameRoot -and (& $isGame $GameRoot)) {
+      $db = Join-Path $GameRoot 'Mount\mediapc\stripped\gamedbRC.slt'
+      $marker = if (-not (Test-Path -LiteralPath $db)) { 'no Mount\mediapc database (no database mod installed)' }
+        elseif ($Sqlite -and (Test-Path -LiteralPath $Sqlite)) { if ((& $Sqlite -readonly $db "SELECT COUNT(*) FROM sqlite_master WHERE name = 'Fh2wheels'") -eq '1') { 'fh2wheels database part present' } else { 'Mount\mediapc database without fh2wheels' } }
+        else { 'Mount\mediapc database (not checked: no sqlite3 yet)' }
+      Write-Host "Game: $GameRoot`n  $marker"
+      $bk = @(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'mod-backups') -Directory -ErrorAction SilentlyContinue | Sort-Object CreationTime | Select-Object -Last 6 |
+        ForEach-Object { "$($_.Name)$(if (Test-Path -LiteralPath (Join-Path $_.FullName 'uninstalled.txt')) { ' (uninstalled)' })" })
+      if ($bk) { Write-Host "  latest mod backups: $($bk -join ', ')" }
+    }
+  } catch { Write-Host "  (report failed: $($_.Exception.Message))" }
+  Write-Host '---'
+}
+trap {
+  Write-Host "`nFAILED: $($_.Exception.Message)" -ForegroundColor Red
+  Write-Host $_.InvocationInfo.PositionMessage
+  Show-State 'at the failure'
+  if ($log) { Stop-Transcript | Out-Null; Write-Host "`nLog: $log (send this file along when reporting a problem)" -ForegroundColor Yellow }
+  break
+}
+if (-not (Test-Path -LiteralPath (Join-Path $here 'tools\build\Build-Mod.ps1')) -or -not (Test-Path -LiteralPath (Join-Path $here 'fh2wheels.dll'))) {
+  throw "The installer's files aren't all here ($here). Extract the whole zip to a folder first (right-click > Extract All), then run Install-Fh2wheels.cmd from that folder."
+}
+
 # asks until the answer passes $test; Enter takes $default when there is one
 function Ask([string]$prompt, [string]$default, [scriptblock]$test, [string]$bad) {
   while ($true) {
@@ -75,6 +130,13 @@ if (-not $azGame -or -not $GameRoot.Equals($azGame, [StringComparison]::OrdinalI
 }
 Write-Host "`nAzimuth: $AzimuthRoot`nGame:    $GameRoot"
 if ($asked -and (Read-Host "$(if ($Uninstall) { 'Uninstall' } else { 'Install' }) fh2wheels here? (Y/n)") -match '^n') { throw 'Stopped; nothing was changed.' }
+if (-not $Sqlite -and (Test-Path (Join-Path $here 'tools\bin\sqlite3.exe'))) { $Sqlite = Join-Path $here 'tools\bin\sqlite3.exe' }
+Show-State 'before'
+function Finish([string]$msg) {
+  Show-State 'after'
+  Write-Host "`n$msg"
+  if ($log) { Stop-Transcript | Out-Null; Write-Host "Log: $log" }
+}
 
 # the database parts installed earlier, newest first, not yet uninstalled
 $backups = @(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'mod-backups') -Directory -Filter 'fh2wheels-*' -ErrorAction SilentlyContinue |
@@ -89,7 +151,7 @@ if ($Uninstall) {
     catch { Write-Warning "Left the database part in $($b.Name): $($_.Exception.Message)"; break }
   }
   try { & $wheelsDll -Azimuth $AzimuthRoot -Uninstall } catch { Write-Warning $_.Exception.Message }
-  Write-Host 'fh2wheels removed.'
+  Finish 'fh2wheels removed.'
   return
 }
 
@@ -121,4 +183,5 @@ if ($backups) {
 
 # --- the DLL ---
 & $wheelsDll -Azimuth $AzimuthRoot -Dll (Join-Path $here 'fh2wheels.dll')
-Write-Host "`nfh2wheels installed. Start the game and look under Upgrades > Tires & Rims."
+Finish ("fh2wheels installed. Start the game from $AzimuthRoot and look under Upgrades > Tires & Rims.`n" +
+  "If the options are missing, or their text is blank: data\bin\fh2wheels.log in that folder shows whether fh2wheels ran.")

@@ -54,6 +54,23 @@ The installer's backups are kept in `<game folder>\mod-backups\fh2wheels-<date>`
 
 Cars that had fh2wheels parts fitted keep the saved part, which does nothing without the mod. Refit stock in the garage before uninstalling if you plan to share a save.
 
+## Troubleshooting
+
+Two logs tell what happened:
+
+- **`fh2wheels-install.log`**, next to `Install-Fh2wheels.cmd`, written on every install or uninstall (in `%TEMP%` when that folder can't be written). It has everything the installer showed, any error, and a report of your setup before and after: the folders, Azimuth and Extra Options, the DLLs in `data\bin`, whether the game folder has fh2wheels' database part, and the start of `fh2wheels.log`.
+- **`fh2wheels.log`** in Azimuth's `data\bin`, rewritten each time the game starts with fh2wheels loaded. If it isn't there or isn't from your last start, the game didn't load fh2wheels.
+
+When reporting a problem, send both, and say which folder you start the game from.
+
+| What you see | Usually |
+|---|---|
+| "The installer's files aren't all here" | The `.cmd` was run from inside the zip. Extract the whole zip (right-click > Extract All) and run it from the extracted folder. |
+| No new options in Tires & Rims | The game was started from a different Azimuth folder, or runs a different game folder than the one installed to. Both are in the install log's report. |
+| Options there, but blank text, or the rear rim changes all four wheels | The database part is installed but `fh2wheels.dll` isn't running: no fresh `fh2wheels.log`. Usually the game was started from another Azimuth folder with an older copy (each Azimuth folder has its own). |
+| "Close Azimuth first" | The game is still running; close it (check Task Manager for azimuth.exe). |
+| "Needs FH2 Extra Options" | Install Extra Options for Azimuth 0.9.10 (`winmm.dll` beside `azimuth.exe`) first. |
+
 ## How it works
 
 - **`fh2wheels.dll`** goes into Azimuth's `data\bin` as `azimuth-tls.dll`; the DLL that was there is renamed `fh2wheels-next.dll`, and fh2wheels loads it, so Extra Options and Azimuth keep working. It applies the offsets and profiles when a car is built, shows the rear rims, lets the game sell the new parts, and supplies the menus' text. Settings: `data\bin\fh2wheels.ini`; log: `data\bin\fh2wheels.log`.

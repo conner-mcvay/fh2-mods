@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 (2026-10-20)
+
+- The installer writes **`fh2wheels-install.log`** (next to it, or in `%TEMP%`): everything it showed, any error with where it happened, and a report of the setup before and after (folders, Azimuth and Extra Options versions and settings, the `data\bin` DLL chain, whether the game folder has fh2wheels' database part, and a summary of `data\bin\fh2wheels.log` with any patch that failed).
+- Run from inside the zip without extracting, it now says to extract the whole zip first, instead of failing on missing files.
+- README: a troubleshooting section.
+
 ## 1.0.1 (2026-10-20)
 
 - The installer asks for the **Azimuth folder and the game folder separately** instead of reading the game folder from Azimuth's settings without asking, which installed into the wrong game for some setups. A folder that isn't right is asked for again. For the game folder it shows the one Azimuth runs (Enter takes it), warns before using a different one, and shows both folders for a yes/no before changing anything.
