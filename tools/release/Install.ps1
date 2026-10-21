@@ -3,7 +3,8 @@
   Installs this mod into a Forza Horizon 2 (PC / Azimuth) game folder, with backups.
 
 .DESCRIPTION
-  Reads install.json next to this script. The mod's files go into Mount\mediapc, Extra Options' override folder:
+  Reads install.json next to this script. The mod's files go into Mount\mediapc (or Mount\mediaoverride, which the
+  game reads before mediapc, for a package built with Build-Mod.ps1 -MediaFolder mediaoverride), Extra Options' override folder:
   the game reads it before Mount\media and doesn't filter it by Mount\hash.manifest, so the game's own files and
   azimuth.exe stay untouched. Needs FH2 Extra Options (winmm.dll beside azimuth.exe for Azimuth 0.9.10, or 0.2.74+
   in data\bin for 0.9.9); turns its [Files] EnableMediaOverrides on if it's off.
@@ -35,7 +36,8 @@ $mount = Join-Path $GameRoot 'Mount'
 $exe = Join-Path $mount 'forza_durango_release_final.exe'
 if (-not (Test-Path -LiteralPath $exe) -or (Sha $exe) -ne $m.game_exe_sha256) { throw "Unsupported game: needs FH2 $($m.game_version) (Mount\forza_durango_release_final.exe SHA-256 $($m.game_exe_sha256))" }
 if (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($AzimuthRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) }) { throw 'Close Azimuth first.' }
-if ($m.install_folder -ne 'mediapc') { throw 'This package was made for an older installer (it patches azimuth.exe); build it again with the current fh2-mods tools.' }
+if ($m.install_folder -notin 'mediapc', 'mediaoverride') { throw 'This package was made for an older installer (it patches azimuth.exe); build it again with the current fh2-mods tools.' }
+$folder = $m.install_folder   # Mount\mediapc, or Mount\mediaoverride (read before mediapc) when built with -MediaFolder
 
 # Extra Options with the override folders, its ini beside its DLL: for Azimuth 0.9.10+ winmm.dll beside azimuth.exe;
 # for 0.9.9 (0.2.74+) data\bin\azimuth-tls.dll, or azimuth-tls-next.dll when another DLL (e.g. fh2net) sits in front
@@ -55,14 +57,14 @@ foreach ($f in $m.files) { if ((Sha (Join-Path $pkg $f.source)) -ne $f.sha256) {
 # earlier mods installed then (unless -Force)
 $conflicts = @()
 foreach ($f in $m.files) {
-  if ($f.target -notmatch '^mediapc\\' -or $f.target -match '(^|\\)\.\.(\\|$)') { throw "Bad target in install.json: $($f.target)" }
+  if (-not $f.target.StartsWith($folder + '\', [StringComparison]::OrdinalIgnoreCase) -or $f.target -match '(^|\\)\.\.(\\|$)') { throw "Bad target in install.json: $($f.target)" }
   $t = Join-Path $mount $f.target
   if ($f.base_sha256) { if (-not (Test-Path -LiteralPath $t) -or (Sha $t) -ne $f.base_sha256) { $conflicts += $f.target } }
   elseif (Test-Path -LiteralPath $t) { $conflicts += $f.target }
 }
 if ($conflicts.Count -and -not $Force) {
   if ($m.layered) { throw ("These files changed since this package was built on top of them (installing would undo that):`n  " + ($conflicts -join "`n  ") + "`nBuild it again, or pass -Force.") }
-  throw ("Another mod already put these files in Mount\mediapc (installing would undo it):`n  " + ($conflicts -join "`n  ") + "`nUninstall that mod first, build the mods together from the fh2-mods repo, or pass -Force.")
+  throw ("Another mod already put these files in Mount\$folder (installing would undo it):`n  " + ($conflicts -join "`n  ") + "`nUninstall that mod first, build the mods together from the fh2-mods repo, or pass -Force.")
 }
 
 # back up, then install
@@ -97,6 +99,6 @@ try {
   }
   throw
 }
-Write-Output "Installed $($m.name) into $(Join-Path $mount 'mediapc')."
+Write-Output "Installed $($m.name) into $(Join-Path $mount $folder)."
 Write-Output "Backup: $backup"
 Write-Output "To undo: powershell -NoProfile -ExecutionPolicy Bypass -File .\Uninstall.ps1 -BackupRoot `"$backup`""

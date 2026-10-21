@@ -6,7 +6,10 @@
 # Paths are relative to Mount ("media\zipmanifest.xml"). Dot-source, then Open-StockSource.
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 
-function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
+# -MediaFolder mediaoverride: install into Mount\mediaoverride instead, the override folder Extra Options reads before
+# Mount\mediapc (for setups where another mod lives there); with -Layer a file is then read from mediaoverride first,
+# then mediapc, then media - the order the game reads them in.
+function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer, [ValidateSet('mediapc', 'mediaoverride')][string]$MediaFolder = 'mediapc') {
   $hashes = @{}
   $table = Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json
   foreach ($p in $table.files.PSObject.Properties) { $hashes[$p.Name.ToLowerInvariant()] = $p.Value }
@@ -14,20 +17,23 @@ function Open-StockSource([string]$Package, [string]$Game, [switch]$Layer) {
     $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $Package).Path)
     $entries = @{}
     foreach ($e in $zip.Entries) { if ($e.Name -and $e.FullName -match '/Mount/(.+)$') { $entries[$Matches[1].Replace('/', '\').ToLowerInvariant()] = $e } }
-    $script:Stock = @{ Kind = 'package'; Zip = $zip; Entries = $entries; Hashes = $hashes }
+    $script:Stock = @{ Kind = 'package'; Zip = $zip; Entries = $entries; Hashes = $hashes; Target = $MediaFolder }
   } elseif ($Game) {
     $mount = Join-Path (Resolve-Path $Game).Path 'Mount'
     if (-not (Test-Path (Join-Path $mount 'forza_durango_release_final.exe'))) { throw "Not an FH2 game folder (no Mount\forza_durango_release_final.exe): $Game" }
     $exe = Join-Path $mount 'forza_durango_release_final.exe'
     if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hashes['forza_durango_release_final.exe']) { throw "Unsupported game version (Mount\forza_durango_release_final.exe isn't the one this tool knows): $Game" }
-    $script:Stock = @{ Kind = 'game'; Mount = $mount; Hashes = $hashes; Verified = @{}; Layer = [bool]$Layer }
+    $script:Stock = @{ Kind = 'game'; Mount = $mount; Hashes = $hashes; Verified = @{}; Layer = [bool]$Layer; Target = $MediaFolder
+      Overrides = $(if ($MediaFolder -eq 'mediaoverride') { @('mediaoverride', 'mediapc') } else { @('mediapc') }) }
   } elseif ($Layer) { throw '-Layer needs -Game' } else { throw 'Pass -Package <Anthem_*.zip> or -Game <folder containing Mount> (or set FH2_PACKAGE / FH2_GAME)' }
 }
 
-function Get-LayerPath([string]$rel) {   # where a game-folder file is read from: mediapc's copy first (-Layer)
+function Get-LayerPath([string]$rel) {   # where a game-folder file is read from: the override folders' copy first (-Layer)
   if ($script:Stock.Layer -and $rel -match '^media\\(.+)$') {
-    $pc = Join-Path $script:Stock.Mount ('mediapc\' + $Matches[1])
-    if (Test-Path -LiteralPath $pc -PathType Leaf) { return $pc }
+    foreach ($d in $script:Stock.Overrides) {
+      $pc = Join-Path $script:Stock.Mount ($d + '\' + $Matches[1])
+      if (Test-Path -LiteralPath $pc -PathType Leaf) { return $pc }
+    }
   }
   return Join-Path $script:Stock.Mount $rel
 }
@@ -39,7 +45,7 @@ function Get-GameMediaFile([string]$GameRoot, [string]$rel) {
 }
 
 function Get-InstalledPath([string]$rel) {   # Mount-relative path a mod installs media\<path> to
-  if ($rel -match '^media\\(.+)$') { return 'mediapc\' + $Matches[1] }
+  if ($rel -match '^media\\(.+)$') { return $(if ($script:Stock.Target) { $script:Stock.Target } else { 'mediapc' }) + '\' + $Matches[1] }
   return $rel
 }
 
@@ -82,7 +88,10 @@ function Get-StockList {   # every path under Mount (lowercase); with -Layer, me
   if ($script:Stock.Kind -eq 'package') { return @($script:Stock.Entries.Keys) }
   $m = $script:Stock.Mount
   $all = @(Get-ChildItem -Recurse -File $m | ForEach-Object { $_.FullName.Substring($m.Length + 1).ToLowerInvariant() })
-  if ($script:Stock.Layer) { $all = @($all | ForEach-Object { if ($_ -match '^mediapc\\(.+)$') { 'media\' + $Matches[1] } else { $_ } } | Select-Object -Unique) }
+  if ($script:Stock.Layer) {
+    $ov = '^(' + ($script:Stock.Overrides -join '|') + ')\\(.+)$'
+    $all = @($all | ForEach-Object { if ($_ -match $ov) { 'media\' + $Matches[2] } else { $_ } } | Select-Object -Unique)
+  }
   return $all
 }
 

@@ -1,8 +1,8 @@
 // Included by fh2wheels.c before rims.c. Reads, with a small read-only SQLite file reader (format: sqlite.org/
 // fileformat.html), the rims' Ids and MediaNames (List_Wheels) from the game database file and the garage's rims
 // (Career_Garage) from the save, for rims.c. The game
-// folder is the one Azimuth runs (data\azimuth.ini, [title-1a96545b] folder=); its database is Mount\mediapc\stripped\
-// gamedbRC.slt (mods) or Mount\media\stripped\gamedbRC.slt.
+// folder is the one Azimuth runs (data\azimuth.ini, [title-1a96545b] folder=); its database is the first of
+// Mount\mediaoverride, Mount\mediapc (mods) and Mount\media's stripped\gamedbRC.slt, as the game reads them.
 
 typedef struct { const BYTE *data; size_t size; unsigned page, usable; } SqliteFile;
 
@@ -138,9 +138,14 @@ static void rims_read_gamedb(const wchar_t *dllDir) {
   wchar_t rel[MAX_PATH];   // Azimuth can keep it relative to its own folder (data\bin\..\..)
   if (!(game[0] == L'\\' || (game[0] && game[1] == L':'))) { wcscpy(rel, game); _snwprintf(game, MAX_PATH, L"%ls..\\..\\%ls", dllDir, rel); }
   if (GetFullPathNameW(game, MAX_PATH, rel, NULL)) wcscpy(game, rel);
-  _snwprintf(db, MAX_PATH, L"%ls\\Mount\\mediapc\\stripped\\gamedbRC.slt", game);
-  int mediapc = GetFileAttributesW(db) != INVALID_FILE_ATTRIBUTES;
-  if (!mediapc) _snwprintf(db, MAX_PATH, L"%ls\\Mount\\media\\stripped\\gamedbRC.slt", game);
+  // the copy the game reads: Extra Options' override folders first (mediaoverride, then mediapc), then the game's own
+  static const wchar_t *const folders[] = { L"mediaoverride", L"mediapc", L"media" };
+  int at = 0;
+  for (; at < 3; at++) {
+    _snwprintf(db, MAX_PATH, L"%ls\\Mount\\%ls\\stripped\\gamedbRC.slt", game, folders[at]);
+    if (GetFileAttributesW(db) != INVALID_FILE_ATTRIBUTES) break;
+  }
+  int mediapc = at < 2;
   SqliteFile f; BYTE *data = sqlite_open(db, 0, &f);
   if (!data) return;
   SqliteFind q = { "List_Wheels", 0, "" }, mark = { "Fh2wheels", 0, "" };
@@ -152,8 +157,9 @@ static void rims_read_gamedb(const wchar_t *dllDir) {
   if (g_rimCount) qsort(g_rims, g_rimCount, sizeof *g_rims, rim_cmp);
   logf("rims: %d rims read from %ls", g_rimCount, db);
   if (!mark.root)
-    logf("PROBLEM: that game database has no fh2wheels part (%ls): run Install-Fh2wheels.cmd for the game folder %ls",
-         mediapc ? L"another mod's, in Mount\\mediapc" : L"the game's own; nothing in Mount\\mediapc", game);
+    logf("PROBLEM: that game database has no fh2wheels part (%ls): run Install-Fh2wheels.cmd for the game folder %ls%ls",
+         mediapc ? L"another mod's" : L"the game's own", game,
+         at == 0 ? L", into Mount\\mediaoverride (the game reads it before Mount\\mediapc)" : L"");
   else logf("game database: fh2wheels part present");
 }
 

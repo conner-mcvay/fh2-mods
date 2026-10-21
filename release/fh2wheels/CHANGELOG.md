@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0 (2026-10-20)
+
+- **Works alongside mods in `Mount\mediaoverride`** (such as backports of newer Forza titles), which the game reads before `Mount\mediapc`. When another mod has its own game database or physics settings there, the installer offers to install into `Mount\mediaoverride` (the default then), built on top of that mod's files so its changes stay, with them backed up for uninstalling. `-MediaFolder mediapc|mediaoverride` picks it from the command line.
+- The install log's report lists the game database in both folders, whether each has fh2wheels, and which one the game reads.
+- `fh2wheels.log` reads the game database the way the game does (`Mount\mediaoverride` first), and its `PROBLEM:` line says when fh2wheels belongs in `Mount\mediaoverride`.
+
 ## 1.0.4 (2026-10-20)
 
 - `fh2wheels.log` says whether the game database fh2wheels reads at start has fh2wheels' part in it (`game database: fh2wheels part present`, or a `PROBLEM:` line naming the database and the game folder to install into), with that database's full path. A game folder Azimuth keeps relative to its own folder is resolved against the Azimuth folder.

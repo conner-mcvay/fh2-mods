@@ -29,6 +29,8 @@ param(
   [string]$Game = $env:FH2_GAME,         # ...or a game folder (containing Mount) with stock files
   [switch]$Layer,                        # with -Game: build on top of the installed files (other mods included); the
                                          #   result installs only onto exactly that state
+  [ValidateSet('mediapc', 'mediaoverride')][string]$MediaFolder = 'mediapc',   # where it installs (Mount\<folder>);
+                                         #   mediaoverride: above mediapc, for setups where another mod lives there
   [string]$Sqlite = $env:FH2_SQLITE,
   [string]$Fm5Media = $env:FH2_FM5_MEDIA
 )
@@ -36,7 +38,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
 . (Join-Path $PSScriptRoot 'StockSource.ps1')
 if (-not $Name) { if ($Mod.Count -eq 1) { $Name = $Mod[0] } else { throw 'Pass -Name when building several mods together' } }
-if ($Game) { Open-StockSource -Game $Game -Layer:$Layer } else { Open-StockSource -Package $Package }
+if ($Game) { Open-StockSource -Game $Game -Layer:$Layer -MediaFolder $MediaFolder } else { Open-StockSource -Package $Package -MediaFolder $MediaFolder }
 
 $root = Split-Path (Split-Path $PSScriptRoot)   # tools\build -> repo root
 $modsRoot = if ($env:FH2_MODS_ROOT) { $env:FH2_MODS_ROOT } else { Join-Path $root 'mods' }   # generated mods can live outside the repo
@@ -282,7 +284,7 @@ try {
 $version = if ((Get-Content (Join-Path $PSScriptRoot 'stock-hashes.json') -Raw | ConvertFrom-Json).game -match '(\d+\.\d+\.\d+\.\d+)') { $Matches[1] } else { 'unknown' }
 [ordered]@{
   name = $Name; mods = $Mod; layered = [bool]$Layer; game_version = $version; game_exe_sha256 = $gameSha
-  install_folder = 'mediapc'; requires = 'FH2 Extra Options (Azimuth 0.9.10 build, or 0.2.74+ on 0.9.9) with [Files] EnableMediaOverrides=1'
+  install_folder = $MediaFolder; requires = 'FH2 Extra Options (Azimuth 0.9.10 build, or 0.2.74+ on 0.9.9) with [Files] EnableMediaOverrides=1'
   files = @($files)
 } | ConvertTo-Json -Depth 4 | Set-Content "$build\install.json" -Encoding UTF8
 Copy-Item (Join-Path $PSScriptRoot '..\release\Install.ps1'), (Join-Path $PSScriptRoot '..\release\Uninstall.ps1') $build

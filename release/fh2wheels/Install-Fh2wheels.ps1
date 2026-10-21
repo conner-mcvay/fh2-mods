@@ -4,7 +4,8 @@
 .DESCRIPTION
   Two halves:
   - the game database part (mods\fh2wheels): built on the game's own database as it is now, imported cars
-    included (tools\build\Build-Mod.ps1 -Layer), then installed into Mount\mediapc with backups
+    included (tools\build\Build-Mod.ps1 -Layer), then installed into Mount\mediapc with backups (or Mount\mediaoverride,
+    which the game reads first: -MediaFolder, or offered when another mod's game database or physics settings are there)
     (tools\release\Install.ps1; needs FH2 Extra Options, whose EnableMediaOverrides it turns on);
   - fh2wheels.dll, put in Azimuth's data\bin\azimuth-tls.dll chain (tools\wheels\Install.ps1).
   Running it again (an update, or after importing more cars) takes the previous database part out first; when another
@@ -20,7 +21,8 @@
 .EXAMPLE
   .\Install-Fh2wheels.ps1 -AzimuthRoot C:\Games\azimuth -Uninstall
 #>
-param([string]$AzimuthRoot, [string]$GameRoot, [string]$Sqlite = $env:FH2_SQLITE, [switch]$Uninstall)
+param([string]$AzimuthRoot, [string]$GameRoot, [string]$Sqlite = $env:FH2_SQLITE, [switch]$Uninstall,
+  [ValidateSet('', 'mediapc', 'mediaoverride')][string]$MediaFolder)   # where the database part goes (see above)
 $ErrorActionPreference = 'Stop'
 $here = $PSScriptRoot
 function Sha([string]$p) { (Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash.ToLowerInvariant() }
@@ -62,11 +64,19 @@ function Show-State([string]$when) {
       } else { Write-Host '  data\bin\fh2wheels.log: none (fh2wheels has not run from this Azimuth folder)' }
     }
     if ($GameRoot -and (& $isGame $GameRoot)) {
-      $db = Join-Path $GameRoot 'Mount\mediapc\stripped\gamedbRC.slt'
-      $marker = if (-not (Test-Path -LiteralPath $db)) { 'no Mount\mediapc database (no database mod installed)' }
-        elseif ($Sqlite -and (Test-Path -LiteralPath $Sqlite)) { if ((& $Sqlite -readonly $db "SELECT COUNT(*) FROM sqlite_master WHERE name = 'Fh2wheels'") -eq '1') { 'fh2wheels database part present' } else { 'Mount\mediapc database without fh2wheels' } }
-        else { 'Mount\mediapc database (not checked: no sqlite3 yet)' }
-      Write-Host "Game: $GameRoot`n  $marker"
+      Write-Host "Game: $GameRoot"
+      $reads = $null   # the game reads the first of these that exists
+      foreach ($d in 'mediaoverride', 'mediapc') {
+        $db = Join-Path $GameRoot "Mount\$d\stripped\gamedbRC.slt"
+        if (-not (Test-Path -LiteralPath $db)) { Write-Host "  Mount\$d\stripped\gamedbRC.slt: none"; continue }
+        $has = if ($Sqlite -and (Test-Path -LiteralPath $Sqlite)) { if ((& $Sqlite -readonly $db "SELECT COUNT(*) FROM sqlite_master WHERE name = 'Fh2wheels'") -eq '1') { 'with fh2wheels' } else { 'WITHOUT fh2wheels' } } else { '(not checked: no sqlite3 yet)' }
+        Write-Host "  Mount\$d\stripped\gamedbRC.slt: $has$(if (-not $reads) { ' <- the one the game reads' })"
+        if (-not $reads) { $reads = $d }
+      }
+      if (-not $reads) { Write-Host '  the game reads its own database (no database mod installed)' }
+      if (Test-Path -LiteralPath (Join-Path $GameRoot 'Mount\mediaoverride')) {
+        Write-Host "  Mount\mediaoverride: $(@(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'Mount\mediaoverride') -Recurse -File -ErrorAction SilentlyContinue).Count) files"
+      }
       $bk = @(Get-ChildItem -LiteralPath (Join-Path $GameRoot 'mod-backups') -Directory -ErrorAction SilentlyContinue | Sort-Object CreationTime | Select-Object -Last 6 |
         ForEach-Object { "$($_.Name)$(if (Test-Path -LiteralPath (Join-Path $_.FullName 'uninstalled.txt')) { ' (uninstalled)' })" })
       if ($bk) { Write-Host "  latest mod backups: $($bk -join ', ')" }
@@ -134,7 +144,22 @@ if (-not $azGame -or -not $GameRoot.Equals($azGame, [StringComparison]::OrdinalI
     "and rear rims won't work. Pick that game folder in Azimuth first, or enter the folder it runs.")
   if ($asked -and (Read-Host 'Install there anyway? (y/N)') -notmatch '^y') { throw 'Stopped; nothing was changed.' }
 }
-Write-Host "`nAzimuth: $AzimuthRoot`nGame:    $GameRoot"
+# --- where the database part goes: Mount\mediapc, or Mount\mediaoverride, which the game reads first. When another mod
+# (e.g. a backport of newer Forza titles) puts its own game database or physics settings in mediaoverride, those
+# hide anything in mediapc, so fh2wheels has to go into mediaoverride, built on top of that mod's files ---
+if (-not $Uninstall -and -not $MediaFolder) {
+  $ovr = Join-Path $GameRoot 'Mount\mediaoverride'
+  $shadows = @('stripped\gamedbRC.slt', 'physics\PhysicsSettings.ini' | Where-Object { Test-Path -LiteralPath (Join-Path $ovr $_) })
+  $MediaFolder = if ($shadows) { 'mediaoverride' } else { 'mediapc' }
+  if ($asked -and (Test-Path -LiteralPath $ovr)) {
+    Write-Host "`nAnother mod has files in Mount\mediaoverride, which the game reads before Mount\mediapc (where mods usually go)."
+    if ($shadows) { Write-Host "It has its own $($shadows -join ' and '), which would hide fh2wheels' in Mount\mediapc, so fh2wheels should go into Mount\mediaoverride, on top of that mod's (its files are backed up and come back on uninstall)." }
+    else { Write-Host 'It has no game database or physics settings there, so Mount\mediapc works.' }
+    $a = Read-Host "Install into Mount\mediaoverride instead of Mount\mediapc? ($(if ($shadows) { 'Y/n' } else { 'y/N' }))"
+    if ($a -match '^y') { $MediaFolder = 'mediaoverride' } elseif ($a -match '^n') { $MediaFolder = 'mediapc' }
+  }
+}
+Write-Host "`nAzimuth: $AzimuthRoot`nGame:    $GameRoot$(if (-not $Uninstall) { "`nInto:    Mount\$MediaFolder" })"
 if ($asked -and (Read-Host "$(if ($Uninstall) { 'Uninstall' } else { 'Install' }) fh2wheels here? (Y/n)") -match '^n') { throw 'Stopped; nothing was changed.' }
 if (-not $Sqlite -and (Test-Path (Join-Path $here 'tools\bin\sqlite3.exe'))) { $Sqlite = Join-Path $here 'tools\bin\sqlite3.exe' }
 Show-State 'before'
@@ -184,7 +209,7 @@ if ($backups) {
   try { & $uninstallDb -BackupRoot $backups[0].FullName; Write-Host "Took out the previous fh2wheels database part ($($backups[0].Name))." }
   catch { Write-Host "The previous fh2wheels database part stays (another mod went in after it); the new one goes on top." }
 }
-& (Join-Path $here 'tools\build\Build-Mod.ps1') -Mod fh2wheels -Game $GameRoot -Layer -Sqlite $Sqlite
+& (Join-Path $here 'tools\build\Build-Mod.ps1') -Mod fh2wheels -Game $GameRoot -Layer -MediaFolder $MediaFolder -Sqlite $Sqlite
 & (Join-Path $here 'build\fh2wheels\Install.ps1') -GameRoot $GameRoot -AzimuthRoot $AzimuthRoot
 
 # --- the DLL ---

@@ -39,6 +39,8 @@ The offset and profile categories use the wheel camera, so the car stays in view
 
    A wrong folder is asked for again. If the game folder isn't the one Azimuth runs, you get a warning first: install into the folder Azimuth runs, or the game won't see the mod. It shows both folders and asks before changing anything.
 
+   If another mod has put files in **`Mount\mediaoverride`** (some mod packs, such as backports of newer Forza titles, install there instead of `Mount\mediapc`), the installer asks whether to install into `Mount\mediaoverride` as well. The game reads that folder first, so when that mod has its own game database there, fh2wheels has to go there too. It's then built on top of that mod's database, keeping its changes, and that mod's files come back when you uninstall fh2wheels.
+
    If you have **more than one Azimuth folder**, install fh2wheels into the one you start the game from: each Azimuth folder has its own copy of `fh2wheels.dll`.
 4. Start the game; the new options are in Upgrades > Tires & Rims.
 
@@ -66,7 +68,8 @@ When reporting a problem, send both, and say which folder you start the game fro
 | What you see | Usually |
 |---|---|
 | "The installer's files aren't all here" | The `.cmd` was run from inside the zip. Extract the whole zip (right-click > Extract All) and run it from the extracted folder. |
-| No new options in Tires & Rims | The game was started from a different Azimuth folder, or runs a different game folder than the one installed to. Both are in the install log's report. |
+| No new options in Tires & Rims, not even the new rim sizes or tire widths | The game isn't reading the database fh2wheels installed. Most often another mod has its own game database in `Mount\mediaoverride`, which the game reads first: install again and answer **Y** to installing into `Mount\mediaoverride`. Otherwise the game was started from a different Azimuth folder, or runs a different game folder than the one installed to. The install log's report shows which database the game reads and whether it has fh2wheels; `fh2wheels.log` says so too (`PROBLEM:` line). |
+| Upgrading or uninstalling the other mod in `Mount\mediaoverride` | Uninstall fh2wheels first, then update that mod, then install fh2wheels again. Otherwise one would undo the other's database changes. |
 | Options there, but blank text, or the rear rim changes all four wheels | The database part is installed but `fh2wheels.dll` isn't running: no fresh `fh2wheels.log`. Usually the game was started from another Azimuth folder with an older copy (each Azimuth folder has its own). |
 | "Close Azimuth first" | The game is still running; close it (check Task Manager for azimuth.exe). |
 | "Needs FH2 Extra Options" | Install Extra Options for Azimuth 0.9.10 (`winmm.dll` beside `azimuth.exe`) first. |
