@@ -19,6 +19,8 @@ Under **Upgrades > Tires & Rims**:
 
 Under **Tuning**, on cars with adjustable springs: **ride height** 10 cm lower and 40 cm higher than the game allows, **camber** -15 to +15 degrees.
 
+Under **Tuning > Alignment**, on every car: **Steering Angle**, the steering lock, 20 to 75 degrees (most cars come with about 42). It's kept per car model in `data\bin\fh2wheels-steering.ini`, not in the save.
+
 The offset and profile categories use the wheel camera, so the car stays in view while you pick.
 
 ## What you need
@@ -78,7 +80,7 @@ When reporting a problem, send both, and say which folder you start the game fro
 ## How it works
 
 - **`fh2wheels.dll`** goes into Azimuth's `data\bin` as `azimuth-tls.dll`; the DLL that was there is renamed `fh2wheels-next.dll`, and fh2wheels loads it, so Extra Options and Azimuth keep working. It applies the offsets and profiles when a car is built, shows the rear rims, lets the game sell the new parts, and supplies the menus' text. Settings: `data\bin\fh2wheels.ini`; log: `data\bin\fh2wheels.log`.
-- **The game database** (`Mount\mediapc\stripped\gamedbRC.slt`): the new categories and options, each car's rim sizes, tire widths and drag/rally tires, and the ride height ranges. The camber range is in `Mount\mediapc\physics\PhysicsSettings.ini`.
+- **The game database** (`Mount\mediapc\stripped\gamedbRC.slt`): the new categories and options, each car's rim sizes, tire widths and drag/rally tires, and the ride height ranges. The camber range is in `Mount\mediapc\physics\PhysicsSettings.ini`, and the Steering Angle row in the tuning screen (`Mount\mediapc\UI.zip`).
 
 Both halves are needed: without the DLL, the offset and profile options do nothing and their text is blank.
 
@@ -93,3 +95,4 @@ fh2wheels and fh2net both sit in the `azimuth-tls.dll` chain and work together, 
 - A rear rim shows only with an aftermarket front rim: with the stock rims, the car draws its own wheels on all four corners.
 - The game doesn't draw rims larger than 24", so the sizes stop there. Cars that come with larger rims keep them.
 - Very wide tires and big offsets go through the bodywork; that's the point for some builds.
+- Steering Angle is new and still has rough edges. A changed angle takes effect the next time the car is loaded, not the moment you apply it, and two cars of the same model share one angle.

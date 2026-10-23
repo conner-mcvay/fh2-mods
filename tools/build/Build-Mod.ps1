@@ -5,6 +5,8 @@
 .DESCRIPTION
   Each mod folder mirrors the game's media folder. Only changed/added content is stored in the repo:
     mods\<name>\media\Camera.zip\CameraSettings.ini       folder named like a zip: replacement/new entries for that zip
+                                                          (<entry>.set: "key value" lines patched in; <entry>.insert:
+                                                          lines added after a line of the entry, see Insert-Lines)
     mods\<name>\media\stripped\gamedbRC.slt\*.sql          folder named like a .slt: SQL patches, applied in name order
     mods\<name>\media\<path>\<file>                        anything else: loose file copied as-is
     mods\<name>\media\<path>\<file>.set                    "key value" lines patched into the game's <file> (as in zips)
@@ -88,6 +90,38 @@ function Set-IniKeys([string]$file, [string]$set, [string]$label) {
   }
   [IO.File]::WriteAllLines($file, $lines)
 }
+function Insert-Lines([string]$file, [string]$insert, [string]$label) {
+  # Adds lines to a text $file from the .insert file $insert: blocks, each starting with "#!after <text>" (the first
+  # line of $file containing <text>), optionally "#!skip <n>" (insert that many lines further on), then the lines to
+  # insert. A block whose lines are already there is left alone, so a layered build can apply it again. Keeps the
+  # file's line endings and byte order mark.
+  $bytes = [IO.File]::ReadAllBytes($file)
+  $bom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+  $text = (New-Object Text.UTF8Encoding $false).GetString($bytes, $(if ($bom) { 3 } else { 0 }), $bytes.Length - $(if ($bom) { 3 } else { 0 }))
+  $nl = if ($text.Contains("`r`n")) { "`r`n" } else { "`n" }
+  $lines = [Collections.Generic.List[string]]($text -split "`r?`n")
+  $blocks = @(); $cur = $null
+  foreach ($l in [IO.File]::ReadAllLines($insert)) {
+    if ($l -match '^#!after\s+(.+)$') { $cur = @{ After = $Matches[1].Trim(); Skip = 0; Lines = [Collections.Generic.List[string]]::new() }; $blocks += $cur }
+    elseif ($l -match '^#!skip\s+(\d+)\s*$' -and $cur) { $cur.Skip = [int]$Matches[1] }
+    elseif ($cur) { $cur.Lines.Add($l) }
+  }
+  if (-not $blocks) { throw "${label}: no '#!after' block in $insert" }
+  foreach ($b in $blocks) {
+    while ($b.Lines.Count -and -not $b.Lines[$b.Lines.Count - 1].Trim()) { $b.Lines.RemoveAt($b.Lines.Count - 1) }
+    $i = -1; for ($j = 0; $j -lt $lines.Count; $j++) { if ($lines[$j].Contains($b.After)) { $i = $j; break } }
+    if ($i -lt 0) { throw "${label}: no line containing '$($b.After)'" }
+    $at = $i + 1 + $b.Skip
+    $there = $at + $b.Lines.Count -le $lines.Count
+    for ($k = 0; $there -and $k -lt $b.Lines.Count; $k++) { if ($lines[$at + $k] -ne $b.Lines[$k]) { $there = $false } }
+    if ($there) { Write-Host "INSERT   ${label}: $($b.Lines.Count) lines after '$($b.After)' already there"; continue }
+    $lines.InsertRange($at, $b.Lines)
+    Write-Host "INSERT   ${label}: $($b.Lines.Count) lines after '$($b.After)'"
+  }
+  $out = (New-Object Text.UTF8Encoding $false).GetBytes(($lines -join $nl))
+  if ($bom) { $out = [byte[]](0xEF, 0xBB, 0xBF) + $out }
+  [IO.File]::WriteAllBytes($file, $out)
+}
 function Resolve-Sqlite {
   if ($script:Sqlite) { return $script:Sqlite }
   $cmd = Get-Command sqlite3 -ErrorAction SilentlyContinue
@@ -156,15 +190,21 @@ try {
     }
 
     # zip overlays. <entry>.set files patch an existing ini entry key by key ("key value" lines) instead of replacing
-    # it, so several mods can change different keys of one file (e.g. CameraSettings.ini)
+    # it, so several mods can change different keys of one file (e.g. CameraSettings.ini); <entry>.insert files add
+    # lines to an existing text entry (Insert-Lines), so a mod carries only its own lines of a game file
     foreach ($zd in Get-ChildItem -Recurse -Directory $modMedia | Where-Object { $_.Name -like '*.zip' }) {
       $rel = $zd.FullName.Substring($modMedia.Length + 1)
       Use-Zip $rel
-      Copy-Item -Recurse -Force "$($zd.FullName)\*" $zips[$rel] -Exclude '*.set'
+      Copy-Item -Recurse -Force "$($zd.FullName)\*" $zips[$rel] -Exclude '*.set', '*.insert'
       foreach ($set in Get-ChildItem -Recurse -File $zd.FullName -Filter *.set) {
         $entry = Join-Path $zips[$rel] ($set.FullName.Substring($zd.FullName.Length + 1) -replace '\.set$', '')
         if (-not (Test-Path $entry)) { throw "$m\$($set.Name): $rel has no entry to patch" }
         Set-IniKeys $entry $set.FullName "$m\$rel\$($set.Name -replace '\.set$', '')"
+      }
+      foreach ($ins in Get-ChildItem -Recurse -File $zd.FullName -Filter *.insert) {
+        $entry = Join-Path $zips[$rel] ($ins.FullName.Substring($zd.FullName.Length + 1) -replace '\.insert$', '')
+        if (-not (Test-Path $entry)) { throw "$m\$($ins.Name): $rel has no entry to patch" }
+        Insert-Lines $entry $ins.FullName "$m\$rel\$($ins.Name -replace '\.insert$', '')"
       }
     }
 

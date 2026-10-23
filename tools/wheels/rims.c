@@ -86,7 +86,9 @@ static void rear_set(int front, int rear, int seeded) {
   int i = rear_slot(front);
   g_rearOf[i].rear = rear; g_rearOf[i].seeded = seeded;
 }
-void __attribute__((used)) rims_seen(BYTE *looks, const int *parts) {
+static void rims_seen_impl(BYTE *looks, const int *parts);
+void __attribute__((used)) rims_seen(BYTE *looks, const int *parts) { PROF_BEGIN; rims_seen_impl(looks, parts); PROF_END(P_LOOKS); }
+static void rims_seen_impl(BYTE *looks, const int *parts) {
   (void)looks;
   if (parts[1] <= 0) return;
   EnterCriticalSection(&g_rimLock);
@@ -138,7 +140,9 @@ static int set_corners(BYTE *frame, const char *rim, int rear) {
   return 1;
 }
 
-void __attribute__((used)) rims_on_load(BYTE *frame, const GameString *loading) {
+static void rims_on_load_impl(BYTE *frame, const GameString *loading);
+void __attribute__((used)) rims_on_load(BYTE *frame, const GameString *loading) { PROF_BEGIN; rims_on_load_impl(frame, loading); PROF_END(P_RIM_LOAD); }
+static void rims_on_load_impl(BYTE *frame, const GameString *loading) {
   const char *name = game_string_text(loading), *front = rim_lookup(g_shopFrontId), *rear;
   if (g_rearMode && front && _stricmp(front, name)) {   // the shop previews a rear rim: the front keeps its own
     if (set_corners(frame, front, 0) && set_corners(frame, name, 1)) logf("rims: front %s, rear %s (preview)", front, name);

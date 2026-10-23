@@ -1,0 +1,13 @@
+#!after Tuning.CasterFront.IsReadOnly
+#!skip 1
+                                <ItemsControl Style="{StaticResource A_Style_ItemsControl_1x3_TuningSpaced_Header}">
+                                    <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}" Text="Steering Angle" HorizontalAlignment="Left" Grid.Column="0"/>
+                                    <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}" Text="{local:Loc Tuning.IDS_Low}" HorizontalAlignment="Left" Grid.Column="1"/>
+                                    <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_Tune_ItemTitle}" Text="{local:Loc Tuning.IDS_High}" HorizontalAlignment="Right" Grid.Column="1"/>
+                                </ItemsControl>
+                                <ItemsControl Style="{StaticResource A_Style_ItemsControl_1x3_TuningSpaced}" Tag="How far the front wheels can turn (steering lock). More angle helps drifting and tight turns; less makes the steering calmer.">
+                                    <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_Tune_ItemLabel}" Text="{local:Loc Tuning.IDS_Angle}" HorizontalAlignment="Left" Grid.Column="0"/>
+                                    <ContentControl Style="{StaticResource A_Style_ContentControl_Slider_Adjust}" DataContext="{Binding Tuning.SteerAngle}" Grid.Column="1"/>
+                                    <local:FZTextBlock Style="{StaticResource A_Style_FZTextBlock_Tune_ItemLabel}" Text="{Binding Tuning.SteerAngle.Text}" HorizontalAlignment="Right" Grid.Column="2"/>
+                                    <local:FZMaterial Style="{StaticResource A_Style_FZMaterial_Tune_ItemLocked}" Visibility="{Binding Tuning.SteerAngle.IsReadOnly, Converter={StaticResource A_FZBooleanToVisibilityConverter}}" Grid.Column="2"/>
+                                </ItemsControl>

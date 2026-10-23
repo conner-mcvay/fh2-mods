@@ -24,6 +24,7 @@ static int contains(const char *s, int n, const char *needle) {
 
 #include "menu.c"
 static char *rims_sql(const char *s, int n);   // rims.c: the wheel shop's queries
+static void steer_sql(const char *s, int n);   // steer.c: a car's tuning saved
 
 // SqlLog=a|b|c: any of them.
 static int sql_logged(const char *s, int n) {
@@ -38,9 +39,12 @@ static int sql_logged(const char *s, int n) {
 
 // A rewritten statement is never freed: SQLite may keep pointers into it (the tail of a multi-statement string),
 // and the few rewritten statements (a car load, opening a menu) are small.
-void __attribute__((used)) sql_on_prepare(const char **psql, int *pn) {
+static void sql_on_prepare_impl(const char **psql, int *pn);
+void __attribute__((used)) sql_on_prepare(const char **psql, int *pn) { PROF_BEGIN; sql_on_prepare_impl(psql, pn); PROF_END(P_SQL); }
+static void sql_on_prepare_impl(const char **psql, int *pn) {
   const char *s = *psql;
   if (!s) return;
+  steer_sql(s, *pn);
   char *r = rims_sql(s, *pn);
   if (!r) r = menu_rewrite(s, *pn);
   if (r) { *psql = r; *pn = -1; s = r; }

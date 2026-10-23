@@ -17,7 +17,9 @@ __attribute__((naked, used)) static const wchar_t *text_original(void *manager, 
     "jmp *g_textBack(%%rip)\n\t" ::: "memory");
 }
 
-const wchar_t * __attribute__((used)) text_lookup(void *manager, unsigned table, unsigned key) {
+static const wchar_t *text_lookup_impl(void *manager, unsigned table, unsigned key);
+const wchar_t * __attribute__((used)) text_lookup(void *manager, unsigned table, unsigned key) { PROF_BEGIN; const wchar_t *r = text_lookup_impl(manager, table, key); PROF_END(P_TEXT); return r; }
+static const wchar_t *text_lookup_impl(void *manager, unsigned table, unsigned key) {
   for (size_t r = 0; r < sizeof g_stringRanges / sizeof *g_stringRanges; r++) {
     unsigned k = (key & 0xFFFF) - g_stringRanges[r].base;
     if (k < g_stringRanges[r].count) return g_stringRanges[r].text[k];

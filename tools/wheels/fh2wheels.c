@@ -19,6 +19,8 @@ static LARGE_INTEGER g_freq, g_t0;
 static wchar_t g_ini[MAX_PATH];
 static char g_iniA[MAX_PATH];
 static wchar_t g_dllDir[MAX_PATH];   // this DLL's folder (data\bin), with a trailing backslash
+// The car being built (wheels.c's slots_stub), for steer.c.
+volatile int g_buildCar;
 
 static void logf(const char *fmt, ...) {
   char buf[1024];
@@ -83,11 +85,13 @@ static int hook_jmp(BYTE *at, const BYTE *orig, SIZE_T n, void *stub, const char
   return patch_code(at, orig, jmp, n, what);
 }
 
+#include "prof.c"
 #include "sql.c"
 #include "wheels.c"
 #include "text.c"
 #include "gamedb.c"
 #include "rims.c"
+#include "steer.c"
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   (void)r;
@@ -95,6 +99,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   DisableThreadLibraryCalls(inst);
   InitializeCriticalSection(&g_logLock);
   InitializeCriticalSection(&g_rimLock);
+  InitializeCriticalSection(&g_steerLock);
   QueryPerformanceFrequency(&g_freq); QueryPerformanceCounter(&g_t0);
   wchar_t path[MAX_PATH]; GetModuleFileNameW(inst, path, MAX_PATH);
   wchar_t *slash = wcsrchr(path, L'\\'); if (slash) slash[1] = 0;
@@ -110,9 +115,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   // The forwarded exports resolve against this module once it is loaded under its own name.
   HMODULE nx = LoadLibraryW(next);
   logf("fh2wheels-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());
+  // [general] Enabled=0: loaded (the DLLs behind it still are) but no hooks, to compare the game without fh2wheels
+  if (!GetPrivateProfileIntW(L"general", L"Enabled", 1, g_ini)) { logf("fh2wheels is off ([general] Enabled=0): no hooks"); return TRUE; }
+  g_prof = GetPrivateProfileIntW(L"debug", L"Profile", 0, g_ini) != 0;
+  if (g_prof) { logf("profiling the hooks every %d s ([debug] Profile=1)", PROF_PERIOD); CloseHandle(CreateThread(NULL, 0, prof_thread, NULL, 0, NULL)); }
   CloseHandle(CreateThread(NULL, 0, wheels_install, NULL, 0, NULL));
   sql_start();
   CloseHandle(CreateThread(NULL, 0, text_install, NULL, 0, NULL));
   CloseHandle(CreateThread(NULL, 0, rims_install, NULL, 0, NULL));
+  CloseHandle(CreateThread(NULL, 0, steer_install, NULL, 0, NULL));
   return TRUE;
 }

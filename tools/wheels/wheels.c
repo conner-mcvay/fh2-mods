@@ -29,6 +29,7 @@ static const int *build_parts(BYTE *frame) { return (const int *)(*(BYTE **)(fra
 __attribute__((naked, used)) static void slots_stub(void) {
   __asm__ volatile(
     "push %%rax\n\t"
+    "mov 0xdc0(%%rbp), %%rax\n\t mov (%%rax), %%eax\n\t mov %%eax, g_buildCar(%%rip)\n\t"   // the car Id, for steer.c
     "mov 0x980(%%rbp), %%eax\n\t sub $91000000, %%eax\n\t cmp $2000, %%eax\n\t jae 1f\n\t movl $-1, 0x980(%%rbp)\n"   // 22: front offset
     "1:\n\t mov 0x9d0(%%rbp), %%eax\n\t sub $92000000, %%eax\n\t cmp $2000, %%eax\n\t jae 2f\n\t movl $-1, 0x9d0(%%rbp)\n"  // 42: rear offset
     "2:\n\t mov 0x990(%%rbp), %%eax\n\t sub $93000000, %%eax\n\t cmp $2000, %%eax\n\t jae 3f\n\t movl $-1, 0x990(%%rbp)\n"  // 26: front profile
@@ -38,7 +39,9 @@ __attribute__((naked, used)) static void slots_stub(void) {
     "jmp *g_slotsBack(%%rip)\n\t" ::: "memory");
 }
 
-float __attribute__((used)) tire_aspect(BYTE *frame, int rear, float aspect) {
+static float tire_aspect_impl(BYTE *frame, int rear, float aspect);
+float __attribute__((used)) tire_aspect(BYTE *frame, int rear, float aspect) { PROF_BEGIN; float r = tire_aspect_impl(frame, rear, aspect); PROF_END(P_TIRE); return r; }
+static float tire_aspect_impl(BYTE *frame, int rear, float aspect) {
   const BYTE *args = *(BYTE **)(frame + 0xDC0);
   if (!args || *(const int *)args != *(const int *)(frame - 0x100 + 0x60)) {   // the car Id twice: is this the build's frame?
     static LONG once; if (!InterlockedExchange(&once, 1)) logf("tire fitter: build frame not where expected; profiles off");
@@ -99,7 +102,9 @@ const float g_hundredth = 0.01f, g_minAspect = 0.10f;
 LOOK_STUB(look_front_stub, 0x70, 93001000, "vmovss %%xmm1, 0x904(%%rsi)", g_lookFrontBack)
 LOOK_STUB(look_rear_stub, 0x14, 94001000, "vmovss %%xmm1, 0xa14(%%rsi)", g_lookRearBack)
 
-void __attribute__((used)) wheels_on_build(BYTE *model, int car, int body, BYTE *frame) {
+static void wheels_on_build_impl(BYTE *model, int car, int body, BYTE *frame);
+void __attribute__((used)) wheels_on_build(BYTE *model, int car, int body, BYTE *frame) { PROF_BEGIN; wheels_on_build_impl(model, car, body, frame); PROF_END(P_BUILD); }
+static void wheels_on_build_impl(BYTE *model, int car, int body, BYTE *frame) {
   float *front = (float *)(model + 0xF4), *rear = (float *)(model + 0xF8);
   const int *parts = build_parts(frame);
   float f = (float)kind_value(parts[g_kinds[FRONT_OFFSET].part], FRONT_OFFSET), r = (float)kind_value(parts[g_kinds[REAR_OFFSET].part], REAR_OFFSET);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0 (2026-10-22)
+
+- **Steering Angle** in Tuning > Alignment, under Front Caster: the car's steering lock, 20 to 75 degrees in 0.5 degree steps, starting from the car's own. It's kept per car model in `data\bin\fh2wheels-steering.ini`, so two garage cars of the same model share it. Still a work in progress; see Known limits in the README.
+- `fh2wheels.ini`: `[general] Enabled=0` loads fh2wheels without any of its hooks, and `[debug] Profile=1` logs how much time its hooks take. Both help tell fh2wheels' cost apart from the game's.
+
 ## 1.1.1 (2026-10-21)
 
 - Fixed the installer failing with "Cannot bind argument to parameter 'Path' because it is null" after **Azimuth was updated or reinstalled**. That puts Azimuth's own `azimuth-tls.dll` back, which drops fh2wheels out of the DLL chain and leaves an old `fh2wheels-next.dll` behind. The installer now replaces that leftover with the current DLL and puts fh2wheels back in (behind fh2net when it's there). Uninstall in that state removes the leftover.
