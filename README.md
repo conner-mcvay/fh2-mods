@@ -55,6 +55,7 @@ tools/
     WheelSwap.ps1                         shared wheel-shop helper (brands, names, wheel zips)
     ForzaModel.cs                         .modelbin (burG) reader/writer + structure check
     Fm5ModelConverter.cs                  converts FM5 car models/materials for FH2's shaders
+  fh6-import/                             converts Forza Horizon 6 wheels for FH2 (fh6_to_fh2.py; see its README.md)
   audio/
     Set-BoostVolume.ps1                   turbo / supercharger volume per car (Set-BoostVolume.cmd runs it)
     FmodBank.cs                           finds those sounds in a car's FMOD bank and sets their volume; lists a bank's layers
