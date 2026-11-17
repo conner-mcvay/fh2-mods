@@ -27,8 +27,8 @@ The offset and profile categories use the wheel camera, so the car stays in view
 
 | | |
 |---|---|
-| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.10** |
-| FH2 Extra Options | the build for Azimuth 0.9.10: `winmm.dll` (with `FH2_ExtraOptions.ini`) beside `azimuth.exe`. It's what makes the game load the changed database (from `Mount\mediapc`); the installer turns on its `[Files] EnableMediaOverrides=1` setting if it's off. |
+| Forza Horizon 2 | version 1.0.0.64 (`Anthem_1.0.0.64_x64__8wekyb3d8bbwe`), running on **Azimuth 0.9.10**, or **Azimuth 1.0** and later |
+| FH2 Extra Options | the build for your Azimuth: `winmm.dll` (with `FH2_ExtraOptions.ini`) beside `azimuth.exe`. It's what makes the game load the changed database (from `Mount\mediapc`); the installer turns on its `[Files] EnableMediaOverrides=1` setting if it's off. On Azimuth 1.0 and later it also loads `fh2wheels.dll` (see How it works). |
 | Windows | 10 or 11, with the built-in Windows PowerShell 5.1 (nothing to install). `sqlite3.exe` is downloaded from sqlite.org on first use (hash-checked) unless it's on your PATH. |
 
 ## Install
@@ -52,7 +52,7 @@ The offset and profile categories use the wheel camera, so the car stays in view
 
 ## Uninstall
 
-Close the game and double-click **`Uninstall-Fh2wheels.cmd`**. It restores the game database from the backup and takes `fh2wheels.dll` out of Azimuth.
+Close the game and double-click **`Uninstall-Fh2wheels.cmd`**. It restores the game database from the backup and takes `fh2wheels.dll` out of Azimuth (on Azimuth 1.0 and later, the Extra Options mod folder, keeping your `*.ini` settings there).
 
 The installer's backups are kept in `<game folder>\mod-backups\fh2wheels-<date>`. Mods that went in after fh2wheels (for example cars imported afterwards) have to come out first, newest first, before the database backup can be restored; the uninstaller says so when that's the case.
 
@@ -63,7 +63,7 @@ Cars that had fh2wheels parts fitted keep the saved part, which does nothing wit
 Two logs tell what happened:
 
 - **`fh2wheels-install.log`**, next to `Install-Fh2wheels.cmd`, written on every install or uninstall (in `%TEMP%` when that folder can't be written). It has everything the installer showed, any error, and a report of your setup before and after: the folders, Azimuth and Extra Options, the DLLs in `data\bin`, whether the game folder has fh2wheels' database part, and the start of `fh2wheels.log`.
-- **`fh2wheels.log`** in Azimuth's `data\bin`, rewritten each time the game starts with fh2wheels loaded. If it isn't there or isn't from your last start, the game didn't load fh2wheels.
+- **`fh2wheels.log`** in Azimuth's `data\bin` (on Azimuth 1.0 and later in `mods\Forza Horizon 2\fh2wheels\plugins`), rewritten each time the game starts with fh2wheels loaded. If it isn't there or isn't from your last start, the game didn't load fh2wheels.
 
 When reporting a problem, send both, and say which folder you start the game from.
 
@@ -74,12 +74,14 @@ When reporting a problem, send both, and say which folder you start the game fro
 | Upgrading or uninstalling the other mod in `Mount\mediaoverride` | Uninstall fh2wheels first, then update that mod, then install fh2wheels again. Otherwise one would undo the other's database changes. |
 | Options there, but blank text, or the rear rim changes all four wheels | The database part is installed but `fh2wheels.dll` isn't running: no fresh `fh2wheels.log`. Usually the game was started from another Azimuth folder with an older copy (each Azimuth folder has its own). |
 | Everything stopped working after updating or reinstalling Azimuth | Azimuth put its own `azimuth-tls.dll` back, which takes fh2wheels out. Run `Install-Fh2wheels.cmd` again (1.1.1 or later). |
+| Offsets or profiles do nothing ("track width not working") after updating to Azimuth 1.0, or the installer stops with "No azimuth-tls.dll in ...\data\bin" | Azimuth 1.0 has no `azimuth-tls.dll` to put fh2wheels in front of. Run `Install-Fh2wheels.cmd` again (1.2.1 or later): it installs fh2wheels as an Extra Options mod instead. |
 | "Close Azimuth first" | The game is still running; close it (check Task Manager for azimuth.exe). |
-| "Needs FH2 Extra Options" | Install Extra Options for Azimuth 0.9.10 (`winmm.dll` beside `azimuth.exe`) first. |
+| "Needs FH2 Extra Options" | Install Extra Options for your Azimuth (`winmm.dll` beside `azimuth.exe`) first. |
 
 ## How it works
 
 - **`fh2wheels.dll`** goes into Azimuth's `data\bin` as `azimuth-tls.dll`; the DLL that was there is renamed `fh2wheels-next.dll`, and fh2wheels loads it, so Extra Options and Azimuth keep working. It applies the offsets and profiles when a car is built, shows the rear rims, lets the game sell the new parts, and supplies the menus' text. Settings: `data\bin\fh2wheels.ini`; log: `data\bin\fh2wheels.log`.
+- **On Azimuth 1.0 and later** there's no `azimuth-tls.dll`: Azimuth ships `azimuth-tls-1.dll` and `azimuth-tls-2.dll`, thread-local storage slots it checks and fills for the game, which nothing can stand in for. fh2wheels is installed as an Extra Options mod instead, `mods\Forza Horizon 2\fh2wheels`: Extra Options loads `plugins\fh2wheels.dll`, and fh2wheels adds its database part (`plugins\fh2wheels.sql`) to the game's database itself at every start, so it's there even when another mod rebuilds `Mount\mediaoverride`'s database (the FH2 Mod Platform does, at every start) and covers cars added since. Its menu text is also in the mod's `strings.json`, which shows when another mod holds the string lookup fh2wheels would hook (CommunityGarage does). Settings and log: `mods\Forza Horizon 2\fh2wheels\plugins\fh2wheels.ini` and `fh2wheels.log`.
 - **The game database** (`Mount\mediapc\stripped\gamedbRC.slt`): the new categories and options, each car's rim sizes, tire widths and drag/rally tires, and the ride height ranges. The camber range is in `Mount\mediapc\physics\PhysicsSettings.ini`, and the Steering Angle row in the tuning screen (`Mount\mediapc\UI.zip`).
 
 Both halves are needed: without the DLL, the offset and profile options do nothing and their text is blank.

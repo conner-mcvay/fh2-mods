@@ -7,7 +7,10 @@
     included (tools\build\Build-Mod.ps1 -Layer), then installed into Mount\mediapc with backups (or Mount\mediaoverride,
     which the game reads first: -MediaFolder, or offered when another mod's game database or physics settings are there)
     (tools\release\Install.ps1; needs FH2 Extra Options, whose EnableMediaOverrides it turns on);
-  - fh2wheels.dll, put in Azimuth's data\bin\azimuth-tls.dll chain (tools\wheels\Install.ps1).
+  - fh2wheels.dll, put in Azimuth's data\bin\azimuth-tls.dll chain, or on Azimuth 1.0 and later (which has no
+    azimuth-tls.dll) installed as an FH2 Extra Options mod, mods\Forza Horizon 2\fh2wheels, which also adds the
+    database part to the game at every start, so it lasts when another mod rebuilds Mount\mediaoverride's database
+    (the FH2 Mod Platform does) (tools\wheels\Install.ps1).
   Running it again (an update, or after importing more cars) takes the previous database part out first; when another
   mod went in after it (so it can't come out without undoing that one), the new one goes on top instead, which
   adds the options for cars that came since. sqlite3.exe is downloaded from sqlite.org (hash-checked) when it isn't
@@ -53,16 +56,24 @@ function Show-State([string]$when) {
       $overrides = (Test-Path -LiteralPath $eoIni) -and [regex]::IsMatch([IO.File]::ReadAllText($eoIni), '(?ms)^\s*\[Files\][^\[]*?^\s*EnableMediaOverrides\s*=\s*1\s*$')
       Write-Host "  winmm.dll: $(& $dllName $eo); FH2_ExtraOptions.ini EnableMediaOverrides=1: $overrides"
       $chain = foreach ($f in 'azimuth-tls.dll', 'azimuth-tls-next.dll', 'fh2wheels-next.dll') { $n = & $dllName (Join-Path $AzimuthRoot "data\bin\$f"); Write-Host ("  data\bin\{0}: {1}" -f $f, $n); $n }
-      if ($chain[0] -ne 'fh2wheels' -and $chain[1] -ne 'fh2wheels') { Write-Host '  PROBLEM: fh2wheels.dll is not in the azimuth-tls.dll chain, so the game does not load it' }
-      $rt = Join-Path $AzimuthRoot 'data\bin\fh2wheels.log'
+      $tls1 = Test-Path -LiteralPath (Join-Path $AzimuthRoot 'data\bin\azimuth-tls-1.dll')
+      if ($tls1) { Write-Host '  data\bin\azimuth-tls-1.dll: there (Azimuth 1.0 or later: fh2wheels goes in as an Extra Options mod)' }
+      # fh2wheels as an Extra Options mod (Azimuth 1.0 and later): mods\Forza Horizon 2\fh2wheels, or mods\fh2wheels
+      $plugin = @('mods\Forza Horizon 2\fh2wheels\plugins', 'mods\fh2wheels\plugins') | ForEach-Object { Join-Path $AzimuthRoot $_ } |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_ 'fh2wheels.dll') } | Select-Object -First 1
+      if ($plugin) { Write-Host "  Extra Options mod: $plugin\fh2wheels.dll ($(& $dllName (Join-Path $plugin 'fh2wheels.dll')))$(if (-not (Test-Path -LiteralPath (Join-Path $plugin 'fh2wheels.sql'))) { '; PROBLEM: no fh2wheels.sql beside it' })" }
+      if ($chain[0] -ne 'fh2wheels' -and $chain[1] -ne 'fh2wheels' -and -not $plugin) {
+        Write-Host "  PROBLEM: fh2wheels.dll is $(if ($tls1) { 'not installed as an Extra Options mod' } else { 'not in the azimuth-tls.dll chain' }), so the game does not load it"
+      }
+      $rt = if ($plugin) { Join-Path $plugin 'fh2wheels.log' } else { Join-Path $AzimuthRoot 'data\bin\fh2wheels.log' }
       if (Test-Path -LiteralPath $rt) {
-        Write-Host "  data\bin\fh2wheels.log ($((Get-Item -LiteralPath $rt).LastWriteTime)):"
+        Write-Host "  $($rt.Substring($AzimuthRoot.Length + 1)) ($((Get-Item -LiteralPath $rt).LastWriteTime)):"
         $lines = @(Get-Content -LiteralPath $rt | Where-Object { $_ -notmatch '^(sql|,|\[|\))' })
         $lines | Select-Object -First 4 | ForEach-Object { Write-Host "    $_" }
         Write-Host "    ... $(@($lines -match 'applied at').Count) patches applied"
         $lines -match 'game database'| Select-Object -First 1 | ForEach-Object { Write-Host "    $_" }
         $lines -match 'not applied|not found|can''t|isn''t|not where expected|no game folder|no save|PROBLEM' | Select-Object -First 10 | ForEach-Object { Write-Host "    PROBLEM: $($_ -replace 'PROBLEM: ', '')" }
-      } else { Write-Host '  data\bin\fh2wheels.log: none (fh2wheels has not run from this Azimuth folder)' }
+      } else { Write-Host "  $($rt.Substring($AzimuthRoot.Length + 1)): none (fh2wheels has not run from there)" }
     }
     if ($GameRoot -and (& $isGame $GameRoot)) {
       Write-Host "Game: $GameRoot"
@@ -214,6 +225,8 @@ if ($backups) {
 & (Join-Path $here 'build\fh2wheels\Install.ps1') -GameRoot $GameRoot -AzimuthRoot $AzimuthRoot
 
 # --- the DLL ---
-& $wheelsDll -Azimuth $AzimuthRoot -Dll (Join-Path $here 'fh2wheels.dll')
+& $wheelsDll -Azimuth $AzimuthRoot -Dll (Join-Path $here 'fh2wheels.dll') -Version $version `
+  -Sql (Join-Path $here 'mods\fh2wheels\media\stripped\gamedbRC.slt\01-fh2wheels.sql') -Strings (Join-Path $here 'tools\wheels\strings.json')
 Finish ("fh2wheels installed. Start the game from $AzimuthRoot and look under Upgrades > Tires & Rims.`n" +
-  "If the options are missing, or their text is blank: data\bin\fh2wheels.log in that folder shows whether fh2wheels ran.")
+  "If the options are missing, or their text is blank: fh2wheels.log (in data\bin, or on Azimuth 1.0 and later in " +
+  "mods\Forza Horizon 2\fh2wheels\plugins) shows whether fh2wheels ran.")

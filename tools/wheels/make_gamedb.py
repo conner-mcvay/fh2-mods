@@ -9,7 +9,12 @@
 #  (the wider camber tuning range is mods\fh2wheels\media\physics\PhysicsSettings.ini.set)
 #  - tools\wheels\strings.h: the text of those names. The game shows gamedb text only through its string tables
 #    ("_&<id>": table in the high 16 bits, key in the low 16), so the rows refer to keys in STRING_RANGES, which no
-#    string table uses, and fh2wheels answers the game's lookups of them (text.c).
+#    string table uses, and fh2wheels answers the game's lookups of them (text.c);
+#  - tools\wheels\strings.json: the same text for FH2 Extra Options, for fh2wheels installed as an Extra Options plugin
+#    (Azimuth 1.0 and later). Extra Options adds the keys to the game's string tables itself, so the text shows even
+#    when text.c's hook can't go in (another mod hooked the same function first; CommunityGarage does).
+# The plugin also runs the SQL on Extra Options' merged database with the game's own SQLite, which is 3.6.19: no WITH,
+# so the rim sizes and tire widths are joined to plain lists of numbers (numbers()).
 # OFFSETS / PROFILES must match menu.c's g_offsetMm / g_profileDelta (index = Level).
 import os
 OFFSETS = [0, -20, -15, -10, -5, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 75, 100, 150]
@@ -40,6 +45,7 @@ WIDTH_TYPES = [('23', 'List_UpgradeCarBodyTireWidthFront', 'FrontTireWidth', 'fr
 RIM_TYPES = [('22', 'List_UpgradeRimSizeFront', 'FrontWheelDiameter', 'front'), ('56', 'List_UpgradeRimSizeRear', 'RearWheelDiameter', 'rear')]
 
 strings = []   # in key order through STRING_RANGES
+string_tables = {}   # text -> the tables it is used from (TABLE_*)
 def key_of(i):
     for base, count in STRING_RANGES:
         if i < count: return base + i
@@ -47,7 +53,10 @@ def key_of(i):
     raise ValueError('out of free string keys')
 def text(table, s):
     if s not in strings: strings.append(s)
+    string_tables.setdefault(s, set()).add(table)
     return f"'_&{(table << 16) | key_of(strings.index(s))}'"
+def numbers(column, values):   # the values as a subquery, a row each, for an SQLite without WITH
+    return '(' + ' UNION ALL '.join([f'SELECT {values[0]} AS {column}'] + [f'SELECT {v}' for v in values[1:]]) + ')'
 
 out = ["-- fh2wheels: per-axle wheel offsets, tire profiles, 13-24 inch rims and 185-395 mm tires under Tires & Rims, wider ride height tuning (needs fh2wheels.dll)", '']
 uid = 1000
@@ -130,13 +139,12 @@ out.append('')
 # Rim sizes: a row per car and size it doesn't offer yet (Id 900000000 + car * 100 + diameter), below or above its
 # stock rim; then the names of those levels (larger ones reuse the game's "Upgraded ... Rim Size" text and icon).
 for tid, table, col, axle in RIM_TYPES:
-    out.append(f'WITH RECURSIVE sizes(inch) AS (SELECT {RIM_MIN} UNION ALL SELECT inch + 1 FROM sizes WHERE inch < {RIM_MAX}) '
-               f'INSERT INTO {table} (Id, Ordinal, Level, IsStock, {col}, Price, MassDiff, DragScale, WindInstabilityScale, RequiresGraphics) '
+    out.append(f'INSERT INTO {table} (Id, Ordinal, Level, IsStock, {col}, Price, MassDiff, DragScale, WindInstabilityScale, RequiresGraphics) '
                f'SELECT 900000000 + s.Ordinal * 100 + z.inch, s.Ordinal, '
                f'CASE WHEN z.inch < s.{col} THEN {RIM_SMALLER_LEVEL} - z.inch ELSE {RIM_LARGER_LEVEL} + z.inch END, 0, z.inch, '
                f'CASE WHEN z.inch < s.{col} THEN {RIM_SMALLER_PRICE} ELSE {RIM_LARGER_PRICE} END, '
                f'ROUND({RIM_MASS_PER_INCH} * (z.inch - s.{col}), 2), 1.0, 1.0, 0 '
-               f'FROM {table} AS s JOIN sizes AS z ON z.inch <> s.{col} '
+               f'FROM {table} AS s JOIN {numbers("inch", list(range(RIM_MIN, RIM_MAX + 1)))} AS z ON z.inch <> s.{col} '
                f'WHERE s.IsStock = 1 AND NOT EXISTS (SELECT 1 FROM {table} AS o WHERE o.Ordinal = s.Ordinal AND o.{col} = z.inch);')
     side = axle.capitalize()
     for inch in range(RIM_MIN, RIM_MAX):   # smaller than some car's stock rim: 13 .. RIM_MAX - 1
@@ -168,13 +176,12 @@ out.append('')
 # tire or wider than its widest one; then the names of those levels (wider ones reuse the game's "Upgraded ... Tire
 # Width" text).
 for tid, table, col, axle in WIDTH_TYPES:
-    out.append(f'WITH RECURSIVE widths(mm) AS (SELECT {WIDTH_MIN} UNION ALL SELECT mm + {WIDTH_STEP} FROM widths WHERE mm < {WIDTH_MAX}) '
-               f'INSERT INTO {table} (Id, CarBodyId, Level, IsStock, {col}, Price, MassDiff, DragScale, WindInstabilityScale, RequiresGraphics) '
+    out.append(f'INSERT INTO {table} (Id, CarBodyId, Level, IsStock, {col}, Price, MassDiff, DragScale, WindInstabilityScale, RequiresGraphics) '
                f'SELECT 1000000000 + s.CarBodyId * 100 + z.mm / 10, s.CarBodyId, '
                f'CASE WHEN z.mm < s.{col} THEN {WIDTH_NARROWER_LEVEL} - z.mm / 10 ELSE {WIDTH_WIDER_LEVEL} + z.mm / 10 END, 0, z.mm, '
                f'CASE WHEN z.mm < s.{col} THEN {WIDTH_NARROWER_PRICE} ELSE {WIDTH_WIDER_PRICE} END, '
                f'ROUND({WIDTH_MASS_PER_MM} * (z.mm - s.{col}), 2), 1.0, 1.0, 0 '
-               f'FROM {table} AS s JOIN widths AS z ON z.mm < s.{col} '
+               f'FROM {table} AS s JOIN {numbers("mm", list(range(WIDTH_MIN, WIDTH_MAX + 1, WIDTH_STEP)))} AS z ON z.mm < s.{col} '
                f'OR z.mm > (SELECT MAX(o.{col}) FROM {table} AS o WHERE o.CarBodyId = s.CarBodyId) '
                f'WHERE s.IsStock = 1;')
     side = axle.capitalize()
@@ -225,3 +232,15 @@ h.append('};')
 p = os.path.join(here, 'strings.h')
 open(p, 'w', newline='\n').write('\n'.join(h) + '\n')
 print(p, len(strings), 'strings')
+
+# The same text as an Extra Options strings.json, under the table each key is used from.
+import json
+TABLE_NAMES = {TABLE_UPGRADES: 'Upgrades', TABLE_UPGRADETYPES: 'UpgradeTypes'}   # their stringtables\<language>.zip files
+tables = {name: {} for name in TABLE_NAMES.values()}
+for i, s in enumerate(strings):
+    for table in sorted(string_tables[s]):
+        tables[TABLE_NAMES[table]][str(key_of(i))] = s
+p = os.path.join(here, 'strings.json')
+open(p, 'w', newline='\n', encoding='utf-8').write(
+    json.dumps({'format_version': 1, 'fallback_language': 'EN', 'languages': {'EN': tables}}, ensure_ascii=False, indent=2) + '\n')
+print(p, ', '.join(f'{len(v)} {k}' for k, v in tables.items()))
