@@ -104,7 +104,7 @@ static void rims_saved(int front, int rear) {
   g_saved[g_savedCount].front = front; g_saved[g_savedCount].rear = rear; g_savedCount++;
 }
 static void rims_seed(void) {
-  garage_read_save(g_dllDir, rims_saved);
+  garage_read_save(g_dataDir, rims_saved);
   for (int i = 0; i < g_savedCount; i++) {
     int front = g_saved[i].front, rear = g_saved[i].rear, same = rear > 0, j;
     for (j = 0; j < g_savedCount && same; j++) if (g_saved[j].front == front && g_saved[j].rear != rear) same = 0;
@@ -258,7 +258,7 @@ static char *rims_sql(const char *s, int n) {
 
 static DWORD WINAPI rims_install(LPVOID p) {
   (void)p;
-  rims_read_gamedb(g_dllDir);
+  rims_read_gamedb(g_dataDir);
   rims_seed();
   static const BYTE load[] = { 0xC6, 0x83, 0x90, 0x01, 0x00, 0x00, 0x00 };          // mov byte [rbx+0x190], 0
   static const BYTE seen[] = { 0x41, 0x83, 0x7D, 0x04, 0xFF };                      // cmp dword [r13+4], -1

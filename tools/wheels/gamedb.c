@@ -3,6 +3,7 @@
 // (Career_Garage) from the save, for rims.c. The game
 // folder is the one Azimuth runs (data\azimuth.ini, [title-1a96545b] folder=); its database is the first of
 // Mount\mediaoverride, Mount\mediapc (mods) and Mount\media's stripped\gamedbRC.slt, as the game reads them.
+// Azimuth's data folder is g_dataDir (beside azimuth.exe), so this works from an Extra Options plugins folder too.
 
 typedef struct { const BYTE *data; size_t size; unsigned page, usable; } SqliteFile;
 
@@ -130,13 +131,13 @@ static BYTE *sqlite_open(const wchar_t *path, size_t skip, SqliteFile *f) {
   return data;
 }
 
-static void rims_read_gamedb(const wchar_t *dllDir) {
+static void rims_read_gamedb(const wchar_t *dataDir) {
   wchar_t ini[MAX_PATH], game[MAX_PATH], db[MAX_PATH];
-  _snwprintf(ini, MAX_PATH, L"%ls..\\azimuth.ini", dllDir);
+  _snwprintf(ini, MAX_PATH, L"%lsazimuth.ini", dataDir);
   GetPrivateProfileStringW(L"title-1a96545b", L"folder", L"", game, MAX_PATH, ini);
   if (!game[0]) { logf("rims: no game folder in %ls", ini); return; }
-  wchar_t rel[MAX_PATH];   // Azimuth can keep it relative to its own folder (data\bin\..\..)
-  if (!(game[0] == L'\\' || (game[0] && game[1] == L':'))) { wcscpy(rel, game); _snwprintf(game, MAX_PATH, L"%ls..\\..\\%ls", dllDir, rel); }
+  wchar_t rel[MAX_PATH];   // Azimuth can keep it relative to its own folder (data\..)
+  if (!(game[0] == L'\\' || (game[0] && game[1] == L':'))) { wcscpy(rel, game); _snwprintf(game, MAX_PATH, L"%ls..\\%ls", dataDir, rel); }
   if (GetFullPathNameW(game, MAX_PATH, rel, NULL)) wcscpy(game, rel);
   // the copy the game reads: Extra Options' override folders first (mediaoverride, then mediapc), then the game's own
   static const wchar_t *const folders[] = { L"mediaoverride", L"mediapc", L"media" };
@@ -156,7 +157,9 @@ static void rims_read_gamedb(const wchar_t *dllDir) {
   free(data);
   if (g_rimCount) qsort(g_rims, g_rimCount, sizeof *g_rims, rim_cmp);
   logf("rims: %d rims read from %ls", g_rimCount, db);
-  if (!mark.root)
+  if (!mark.root && g_plugin)   // plugin.c adds it to Extra Options' copy of the database at start
+    logf("game database file: no fh2wheels part; as an Extra Options plugin, fh2wheels adds it to the game's database at start");
+  else if (!mark.root)
     logf("PROBLEM: that game database has no fh2wheels part (%ls): run Install-Fh2wheels.cmd for the game folder %ls%ls",
          mediapc ? L"another mod's" : L"the game's own", game,
          at == 0 ? L", into Mount\\mediaoverride (the game reads it before Mount\\mediapc)" : L"");
@@ -199,9 +202,9 @@ static void newest_file(const wchar_t *dir, const wchar_t *levels, const wchar_t
   } while (FindNextFileW(h, &fd));
   FindClose(h);
 }
-static void garage_read_save(const wchar_t *dllDir, GarageRimFn fn) {
+static void garage_read_save(const wchar_t *dataDir, GarageRimFn fn) {
   wchar_t saves[MAX_PATH], path[MAX_PATH] = L""; FILETIME t;
-  _snwprintf(saves, MAX_PATH, L"%ls..\\titles\\1A96545B\\saves\\", dllDir);
+  _snwprintf(saves, MAX_PATH, L"%lstitles\\1A96545B\\saves\\", dataDir);
   newest_file(saves, L"player-*|User_*|revisions|*", L"data\\PlayerDatabase", path, &t);
   if (!path[0]) { logf("rims: no save under %ls", saves); return; }
   SqliteFile f; BYTE *data = sqlite_open(path, 8, &f);

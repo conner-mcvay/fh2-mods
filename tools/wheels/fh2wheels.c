@@ -2,6 +2,10 @@
 // in front of the DLL that had that name (renamed fh2wheels-next.dll: Extra Options', fh2net or Azimuth's own),
 // whose exports it forwards (fh2wheels.def). fh2net forwards to azimuth-tls-next.dll instead, so the two chain in
 // either order. Settings: data\bin\fh2wheels.ini; log: data\bin\fh2wheels.log.
+// Azimuth 1.0 has no azimuth-tls.dll (it ships azimuth-tls-1.dll and -2.dll, thread-local storage slots it checks and
+// fills, which nothing can stand in for), so there fh2wheels is an FH2 Extra Options plugin instead: Extra Options loads
+// it from mods\Forza Horizon 2\fh2wheels\plugins, and it adds its database part itself (plugin.c). Its settings and log
+// are then beside it there.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdio.h>
@@ -18,7 +22,9 @@ static HANDLE g_log = INVALID_HANDLE_VALUE;
 static LARGE_INTEGER g_freq, g_t0;
 static wchar_t g_ini[MAX_PATH];
 static char g_iniA[MAX_PATH];
-static wchar_t g_dllDir[MAX_PATH];   // this DLL's folder (data\bin), with a trailing backslash
+static wchar_t g_dllDir[MAX_PATH];   // this DLL's folder (data\bin, or an Extra Options plugins folder), with a trailing backslash
+static wchar_t g_dataDir[MAX_PATH];  // Azimuth's data folder (azimuth.ini, titles), from azimuth.exe's, with a trailing backslash
+static int g_plugin;                 // loaded as an Extra Options plugin rather than in the azimuth-tls.dll chain
 // The car being built (wheels.c's slots_stub), for steer.c.
 volatile int g_buildCar;
 
@@ -92,6 +98,7 @@ static int hook_jmp(BYTE *at, const BYTE *orig, SIZE_T n, void *stub, const char
 #include "gamedb.c"
 #include "rims.c"
 #include "steer.c"
+#include "plugin.c"
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   (void)r;
@@ -104,6 +111,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   wchar_t path[MAX_PATH]; GetModuleFileNameW(inst, path, MAX_PATH);
   wchar_t *slash = wcsrchr(path, L'\\'); if (slash) slash[1] = 0;
   wcscpy(g_dllDir, path);
+  // In the chain this DLL is azimuth-tls.dll (or azimuth-tls-next.dll behind fh2net); anything else is a plugin.
+  wchar_t self[MAX_PATH]; GetModuleFileNameW(inst, self, MAX_PATH);
+  const wchar_t *leaf = wcsrchr(self, L'\\'); leaf = leaf ? leaf + 1 : self;
+  g_plugin = _wcsnicmp(leaf, L"azimuth-tls", 11) != 0;
+  // Azimuth's data folder: beside azimuth.exe (the process), wherever this DLL is
+  GetModuleFileNameW(NULL, g_dataDir, MAX_PATH);
+  slash = wcsrchr(g_dataDir, L'\\'); if (slash) slash[1] = 0;
+  wcsncat(g_dataDir, L"data\\", MAX_PATH - wcslen(g_dataDir) - 1);
   wchar_t logp[MAX_PATH], next[MAX_PATH];
   _snwprintf(logp, MAX_PATH, L"%lsfh2wheels.log", path);
   _snwprintf(next, MAX_PATH, L"%lsfh2wheels-next.dll", path);
@@ -112,9 +127,13 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID r) {
   g_log = CreateFileW(logp, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
   SYSTEMTIME st; GetLocalTime(&st);
   logf("fh2wheels loaded %04d-%02d-%02d %02d:%02d:%02d", st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond);
-  // The forwarded exports resolve against this module once it is loaded under its own name.
-  HMODULE nx = LoadLibraryW(next);
-  logf("fh2wheels-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());
+  if (g_plugin) {
+    logf("loaded as an Extra Options plugin from %ls; Azimuth's data folder: %ls", g_dllDir, g_dataDir);
+  } else {
+    // The forwarded exports resolve against this module once it is loaded under its own name.
+    HMODULE nx = LoadLibraryW(next);
+    logf("fh2wheels-next.dll -> %p (err %lu)", nx, nx ? 0 : GetLastError());
+  }
   // [general] Enabled=0: loaded (the DLLs behind it still are) but no hooks, to compare the game without fh2wheels
   if (!GetPrivateProfileIntW(L"general", L"Enabled", 1, g_ini)) { logf("fh2wheels is off ([general] Enabled=0): no hooks"); return TRUE; }
   g_prof = GetPrivateProfileIntW(L"debug", L"Profile", 0, g_ini) != 0;

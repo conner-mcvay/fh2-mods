@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.2.1 (unreleased)
+
+- **Works on Azimuth 1.0 and later.** Azimuth 1.0 has no `data\bin\azimuth-tls.dll` (it ships `azimuth-tls-1.dll` and `azimuth-tls-2.dll`, thread-local storage slots it checks and fills for the game, which nothing can stand in for), so the installer stopped with "No azimuth-tls.dll in ...\data\bin", and an install from before the update stopped loading: the database options still worked, offsets and profiles didn't ("track width not working", issue #6). On Azimuth 1.0 the installer now installs fh2wheels as an FH2 Extra Options mod, `mods\Forza Horizon 2\fh2wheels`, whose plugins folder Extra Options loads `fh2wheels.dll` from. Azimuth 0.9 installs as before.
+- As an Extra Options plugin, fh2wheels **adds its database part to the game's database itself** at every start (Extra Options' database callback), so it lasts when another mod rebuilds `Mount\mediaoverride`'s database (the FH2 Mod Platform does, at every start, putting aside the copy fh2wheels' installer made) and covers cars added since. The SQL no longer uses `WITH RECURSIVE`, which the game's own SQLite (3.6.19) doesn't have; the rows it makes are the same.
+- **Menu text with CommunityGarage installed:** CommunityGarage hooks the game's string lookup first, so fh2wheels' hook couldn't go in and its categories and options had no names. The Extra Options mod also has the text as `strings.json` (`make_gamedb.py` writes it beside `strings.h`), which shows either way.
+- fh2wheels finds Azimuth's settings and your saves from `azimuth.exe`'s folder rather than its own, so it works from the plugins folder. As an Extra Options mod, its `fh2wheels.ini`, `fh2wheels-steering.ini` and `fh2wheels.log` are in `mods\Forza Horizon 2\fh2wheels\plugins`.
+
 ## 1.2.0 (2026-10-22)
 
 - **Steering Angle** in Tuning > Alignment, under Front Caster: the car's steering lock, 20 to 75 degrees in 0.5 degree steps, starting from the car's own. It's kept per car model in `data\bin\fh2wheels-steering.ini`, so two garage cars of the same model share it. Still a work in progress; see Known limits in the README.

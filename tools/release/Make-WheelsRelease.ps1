@@ -33,7 +33,7 @@ $files = @(
   'LICENSE'
   'tools\build\Build-Mod.ps1', 'tools\build\StockSource.ps1', 'tools\build\Repack-ForzaZip.ps1'
   'tools\build\stock-hashes.json', 'tools\build\stock-cars.txt'
-  'tools\release\Install.ps1', 'tools\release\Uninstall.ps1', 'tools\wheels\Install.ps1'
+  'tools\release\Install.ps1', 'tools\release\Uninstall.ps1', 'tools\wheels\Install.ps1', 'tools\wheels\strings.json'
 )
 $files += Get-ChildItem (Join-Path $root 'mods\fh2wheels') -Recurse -File | ForEach-Object { $_.FullName.Substring($root.Length + 1) }
 foreach ($f in $files) {
